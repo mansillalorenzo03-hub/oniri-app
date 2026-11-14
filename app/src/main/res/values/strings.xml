@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Kanso</string>
+    <string name="accessibility_desc">Detecta cuando abres una app restringida durante tu sesión de concentración.</string>
+</resources>
