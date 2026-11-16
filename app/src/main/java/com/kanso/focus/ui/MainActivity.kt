@@ -191,12 +191,31 @@ fun NetflixProfileGatewayScreen(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black)
+                    .border(1.5.dp, PureWhite.copy(alpha = 0.85f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "K",
+                    color = PureWhite,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.SansSerif
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             Text(
                 text = "KANSO",
                 color = PureWhite,
-                fontSize = 26.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace,
                 letterSpacing = 5.sp
