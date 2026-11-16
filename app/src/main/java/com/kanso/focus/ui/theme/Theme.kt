@@ -10,22 +10,31 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-val PureBlack = Color(0xFF000000)
-val SurfaceZinc = Color(0xFF0F0F12)
-val BorderZinc = Color(0xFF222226)
-val PureWhite = Color(0xFFF4F4F6)
-val MutedGray = Color(0xFF71717A)
+val PureBlack = Color(0xFF07080C)
+val SurfaceZinc = Color(0xFF12141C)
+val SurfaceElevated = Color(0xFF1A1D28)
+val BorderZinc = Color(0xFF282D3E)
+val PureWhite = Color(0xFFF8FAFC)
+val MutedGray = Color(0xFF94A3B8)
+
+val AccentIndigo = Color(0xFF6366F1)
+val AccentViolet = Color(0xFF8B5CF6)
+val AccentEmerald = Color(0xFF10B981)
+val AccentAmber = Color(0xFFF59E0B)
+val AccentCoral = Color(0xFFEF4444)
+val AccentCyan = Color(0xFF06B6D4)
 
 private val KansoColorScheme = darkColorScheme(
-    primary = PureWhite,
-    onPrimary = PureBlack,
-    secondary = MutedGray,
+    primary = AccentIndigo,
+    onPrimary = PureWhite,
+    secondary = AccentEmerald,
     onSecondary = PureBlack,
+    tertiary = AccentViolet,
     background = PureBlack,
     onBackground = PureWhite,
     surface = SurfaceZinc,
     onSurface = PureWhite,
-    surfaceVariant = SurfaceZinc,
+    surfaceVariant = SurfaceElevated,
     onSurfaceVariant = MutedGray,
     outline = BorderZinc
 )

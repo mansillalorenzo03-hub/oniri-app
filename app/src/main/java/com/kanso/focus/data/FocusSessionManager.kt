@@ -1,12 +1,17 @@
 package com.kanso.focus.data
 
 import android.app.AlarmManager
+import android.app.AppOpsManager
 import android.app.PendingIntent
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
+import android.os.Process
 import com.kanso.focus.service.ScheduleReceiver
+import com.kanso.focus.ui.BlockOverlayActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,6 +26,7 @@ import java.util.Calendar
 object FocusSessionManager {
     private const val PREFS_NAME = "kanso_focus_prefs"
     private const val KEY_PROFILES = "profiles_list"
+    private const val KEY_PROFILES_INITIALIZED = "profiles_initialized"
     private const val KEY_ACTIVE_PROFILE = "active_profile"
     private const val KEY_IS_ACTIVE = "is_session_active"
     private const val KEY_IS_STRICT = "is_strict_mode"
@@ -33,9 +39,12 @@ object FocusSessionManager {
 
     private val defaultProfiles = listOf("Estudio", "Trabajo", "Descanso")
 
+    private var appContext: Context? = null
     private var prefs: SharedPreferences? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var timerJob: Job? = null
+    private var monitorJob: Job? = null
+    private var lastOverlayLaunchMillis: Long = 0L
 
     private val _profiles = MutableStateFlow(defaultProfiles)
     val profiles: StateFlow<List<String>> = _profiles.asStateFlow()
@@ -74,28 +83,35 @@ object FocusSessionManager {
         get() = prefs?.getLong(KEY_END_TIME, 0L) ?: 0L
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (prefs != null) {
             restoreSessionState()
+            ensureForegroundMonitor()
             return
         }
         prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadProfiles()
         loadScheduleState()
         restoreSessionState()
+        ensureForegroundMonitor()
     }
 
     private fun loadProfiles() {
+        val initialized = prefs?.getBoolean(KEY_PROFILES_INITIALIZED, false) ?: false
         val savedProfiles = prefs?.getStringSet(KEY_PROFILES, null)?.toList()
-        if (savedProfiles.isNullOrEmpty()) {
+        if (!initialized || savedProfiles.isNullOrEmpty()) {
             _profiles.value = defaultProfiles
-            prefs?.edit()?.putStringSet(KEY_PROFILES, defaultProfiles.toSet())?.apply()
+            prefs?.edit()
+                ?.putStringSet(KEY_PROFILES, defaultProfiles.toSet())
+                ?.putBoolean(KEY_PROFILES_INITIALIZED, true)
+                ?.apply()
         } else {
             val ordered = defaultProfiles.filter { savedProfiles.contains(it) } +
                     savedProfiles.filter { !defaultProfiles.contains(it) }.sorted()
             _profiles.value = ordered
         }
 
-        val current = prefs?.getString(KEY_ACTIVE_PROFILE, "Estudio") ?: "Estudio"
+        val current = prefs?.getString(KEY_ACTIVE_PROFILE, _profiles.value.first()) ?: _profiles.value.first()
         _activeProfile.value = if (_profiles.value.contains(current)) current else _profiles.value.first()
         loadProfilePackages(_activeProfile.value)
     }
@@ -126,9 +142,11 @@ object FocusSessionManager {
         selectProfile(clean)
     }
 
-    fun deleteProfile(name: String) {
-        if (defaultProfiles.contains(name) || _profiles.value.size <= 1) return
+    fun deleteProfile(name: String): Boolean {
+        // Permite borrar cualquier perfil siempre que quede al menos 1 perfil activo
+        if (_profiles.value.size <= 1) return false
         val updated = _profiles.value.filterNot { it == name }
+        if (updated.isEmpty()) return false
         _profiles.value = updated
         prefs?.edit()
             ?.putStringSet(KEY_PROFILES, updated.toSet())
@@ -138,6 +156,7 @@ object FocusSessionManager {
         if (_activeProfile.value == name) {
             selectProfile(updated.first())
         }
+        return true
     }
 
     fun toggleRestrictedPackage(packageName: String) {
@@ -173,6 +192,7 @@ object FocusSessionManager {
             ?.putLong(KEY_END_TIME, endMillis)
             ?.apply()
         startCountdownLoop(endMillis)
+        ensureForegroundMonitor()
     }
 
     fun startFlexibleSession(minutes: Int = 0) {
@@ -194,6 +214,7 @@ object FocusSessionManager {
             timerJob?.cancel()
             _remainingSeconds.value = 0L
         }
+        ensureForegroundMonitor()
     }
 
     fun stopSession(): Boolean {
@@ -209,6 +230,7 @@ object FocusSessionManager {
 
     private fun clearSessionState() {
         timerJob?.cancel()
+        monitorJob?.cancel()
         _isSessionActive.value = false
         _isStrictMode.value = false
         _remainingSeconds.value = 0L
@@ -259,6 +281,94 @@ object FocusSessionManager {
                 _remainingSeconds.value = (diffMillis + 999L) / 1000L
                 delay(1000L)
             }
+        }
+    }
+
+    private fun ensureForegroundMonitor() {
+        if (!_isSessionActive.value) {
+            monitorJob?.cancel()
+            return
+        }
+        if (monitorJob?.isActive == true) return
+        monitorJob = scope.launch(Dispatchers.Default) {
+            while (_isSessionActive.value) {
+                val ctx = appContext
+                if (ctx != null && _restrictedPackages.value.isNotEmpty() && hasUsageStatsPermission(ctx)) {
+                    val topPkg = getForegroundPackage(ctx)
+                    if (topPkg != null &&
+                        topPkg != ctx.packageName &&
+                        _restrictedPackages.value.contains(topPkg)
+                    ) {
+                        triggerBlockOverlay(ctx, topPkg)
+                    }
+                }
+                delay(450L)
+            }
+        }
+    }
+
+    fun triggerBlockOverlay(context: Context, blockedPkg: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastOverlayLaunchMillis < 500L) return
+        lastOverlayLaunchMillis = now
+
+        val overlayIntent = Intent(context.applicationContext, BlockOverlayActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+            putExtra("blocked_package", blockedPkg)
+        }
+        context.applicationContext.startActivity(overlayIntent)
+    }
+
+    fun hasUsageStatsPermission(context: Context): Boolean {
+        return try {
+            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow(
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(),
+                    context.packageName
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                appOps.checkOpNoThrow(
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(),
+                    context.packageName
+                )
+            }
+            mode == AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun getForegroundPackage(context: Context): String? {
+        return try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val end = System.currentTimeMillis()
+            val start = end - 10_000L
+            val events = usm.queryEvents(start, end)
+            val event = UsageEvents.Event()
+            var lastForegroundPkg: String? = null
+            var lastTime = 0L
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+                ) {
+                    if (event.timeStamp >= lastTime) {
+                        lastTime = event.timeStamp
+                        lastForegroundPkg = event.packageName
+                    }
+                }
+            }
+            lastForegroundPkg
+        } catch (_: Exception) {
+            null
         }
     }
 
