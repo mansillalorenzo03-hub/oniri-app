@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.kanso.focus.ui.theme.BorderZinc
 import com.kanso.focus.ui.theme.MutedGray
@@ -578,9 +579,6 @@ private fun formatAdaptiveBlockAnnotated(
         }
     }
 }
-
-private val Double.em: androidx.compose.ui.unit.TextUnit
-    get() = androidx.compose.ui.unit.TextUnit(this.toFloat(), androidx.compose.ui.unit.TextUnitType.Em)
 
 private fun splitIntoMicroBlocks(rawText: String): List<String> {
     val normalized = rawText.replace("\r\n", "\n").trim()
