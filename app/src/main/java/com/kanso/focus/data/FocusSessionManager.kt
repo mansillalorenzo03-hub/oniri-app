@@ -8,10 +8,20 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Build
 import android.os.Process
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import com.kanso.focus.service.ScheduleReceiver
 import com.kanso.focus.ui.BlockOverlayActivity
+import com.kanso.focus.ui.InstalledAppInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,7 +31,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 
 object FocusSessionManager {
     private const val PREFS_NAME = "kanso_focus_prefs"
@@ -44,10 +58,16 @@ object FocusSessionManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var timerJob: Job? = null
     private var monitorJob: Job? = null
+    private var preloadAppsJob: Job? = null
     private var lastOverlayLaunchMillis: Long = 0L
+
+    private val profileAvatarBitmaps = ConcurrentHashMap<String, ImageBitmap>()
 
     private val _profiles = MutableStateFlow(defaultProfiles)
     val profiles: StateFlow<List<String>> = _profiles.asStateFlow()
+
+    private val _profileImageVersion = MutableStateFlow(0)
+    val profileImageVersion: StateFlow<Int> = _profileImageVersion.asStateFlow()
 
     private val _activeProfile = MutableStateFlow("Estudio")
     val activeProfile: StateFlow<String> = _activeProfile.asStateFlow()
@@ -57,6 +77,9 @@ object FocusSessionManager {
 
     private val _mutedPackages = MutableStateFlow<Set<String>>(emptySet())
     val mutedPackages: StateFlow<Set<String>> = _mutedPackages.asStateFlow()
+
+    private val _installedApps = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
+    val installedApps: StateFlow<List<InstalledAppInfo>> = _installedApps.asStateFlow()
 
     private val _isSessionActive = MutableStateFlow(false)
     val isSessionActive: StateFlow<Boolean> = _isSessionActive.asStateFlow()
@@ -83,17 +106,82 @@ object FocusSessionManager {
         get() = prefs?.getLong(KEY_END_TIME, 0L) ?: 0L
 
     fun init(context: Context) {
-        appContext = context.applicationContext
+        val appCtx = context.applicationContext
+        appContext = appCtx
         if (prefs != null) {
             restoreSessionState()
             ensureForegroundMonitor()
+            preloadInstalledAppsIfNeeded(appCtx)
             return
         }
-        prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadProfiles()
         loadScheduleState()
         restoreSessionState()
         ensureForegroundMonitor()
+        preloadInstalledAppsIfNeeded(appCtx)
+        preloadProfileAvatars(appCtx)
+    }
+
+    private fun preloadInstalledAppsIfNeeded(context: Context) {
+        if (_installedApps.value.isNotEmpty() || preloadAppsJob?.isActive == true) return
+        preloadAppsJob = scope.launch(Dispatchers.IO) {
+            val loaded = queryLaunchableAppsFast(context)
+            _installedApps.value = loaded
+        }
+    }
+
+    private fun preloadProfileAvatars(context: Context) {
+        scope.launch(Dispatchers.IO) {
+            _profiles.value.forEach { profile ->
+                val path = prefs?.getString(profileImageKey(profile), null)
+                if (!path.isNullOrBlank()) {
+                    val file = File(path)
+                    if (file.exists()) {
+                        BitmapFactory.decodeFile(file.absolutePath)?.let { bmp ->
+                            profileAvatarBitmaps[profile] = bmp.asImageBitmap()
+                        }
+                    }
+                }
+            }
+            _profileImageVersion.value += 1
+        }
+    }
+
+    fun getProfileAvatar(profile: String): ImageBitmap? {
+        return profileAvatarBitmaps[profile]
+    }
+
+    fun setProfileImageFromUri(context: Context, profile: String, uri: Uri) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                } ?: return@launch
+
+                val scaled = scaleCenterCropBitmap(decoded, 280)
+                val avatarDir = File(context.filesDir, "profile_avatars").apply { mkdirs() }
+                val safeFile = File(avatarDir, "avatar_${kotlin.math.abs(profile.hashCode())}.jpg")
+                FileOutputStream(safeFile).use { out ->
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                }
+
+                prefs?.edit()?.putString(profileImageKey(profile), safeFile.absolutePath)?.apply()
+                profileAvatarBitmaps[profile] = scaled.asImageBitmap()
+                _profileImageVersion.value += 1
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun scaleCenterCropBitmap(src: Bitmap, targetSize: Int): Bitmap {
+        val width = src.width.coerceAtLeast(1)
+        val height = src.height.coerceAtLeast(1)
+        val minDim = minOf(width, height)
+        val cropX = (width - minDim) / 2
+        val cropY = (height - minDim) / 2
+        val square = Bitmap.createBitmap(src, cropX, cropY, minDim, minDim)
+        return Bitmap.createScaledBitmap(square, targetSize, targetSize, true)
     }
 
     private fun loadProfiles() {
@@ -125,6 +213,7 @@ object FocusSessionManager {
 
     private fun restrictedKey(profile: String) = "restricted_$profile"
     private fun mutedKey(profile: String) = "muted_$profile"
+    private fun profileImageKey(profile: String) = "profile_img_$profile"
 
     fun selectProfile(profile: String) {
         if (!_profiles.value.contains(profile)) return
@@ -133,29 +222,40 @@ object FocusSessionManager {
         loadProfilePackages(profile)
     }
 
-    fun addProfile(name: String) {
+    fun addProfile(name: String, context: Context? = null, imageUri: Uri? = null) {
         val clean = name.trim()
         if (clean.isEmpty() || _profiles.value.contains(clean)) return
         val updated = _profiles.value + clean
         _profiles.value = updated
         prefs?.edit()?.putStringSet(KEY_PROFILES, updated.toSet())?.apply()
         selectProfile(clean)
+        if (context != null && imageUri != null) {
+            setProfileImageFromUri(context, clean, imageUri)
+        }
     }
 
     fun deleteProfile(name: String): Boolean {
-        // Permite borrar cualquier perfil siempre que quede al menos 1 perfil activo
         if (_profiles.value.size <= 1) return false
         val updated = _profiles.value.filterNot { it == name }
         if (updated.isEmpty()) return false
         _profiles.value = updated
+
+        val oldImgPath = prefs?.getString(profileImageKey(name), null)
+        if (!oldImgPath.isNullOrBlank()) {
+            runCatching { File(oldImgPath).delete() }
+        }
+        profileAvatarBitmaps.remove(name)
+
         prefs?.edit()
             ?.putStringSet(KEY_PROFILES, updated.toSet())
             ?.remove(restrictedKey(name))
             ?.remove(mutedKey(name))
+            ?.remove(profileImageKey(name))
             ?.apply()
         if (_activeProfile.value == name) {
             selectProfile(updated.first())
         }
+        _profileImageVersion.value += 1
         return true
     }
 
@@ -278,7 +378,10 @@ object FocusSessionManager {
                     clearSessionState()
                     break
                 }
-                _remainingSeconds.value = (diffMillis + 999L) / 1000L
+                val nextSecs = (diffMillis + 999L) / 1000L
+                if (_remainingSeconds.value != nextSecs) {
+                    _remainingSeconds.value = nextSecs
+                }
                 delay(1000L)
             }
         }
@@ -474,4 +577,51 @@ object FocusSessionManager {
             String.format("%02d:%02d", mins, secs)
         }
     }
+
+    private fun drawableToCompactImageBitmap(drawable: Drawable): ImageBitmap? {
+        return try {
+            val targetPx = 96
+            val bitmap = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, targetPx, targetPx)
+            drawable.draw(canvas)
+            bitmap.asImageBitmap()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun queryLaunchableAppsFast(context: Context): List<InstalledAppInfo> =
+        withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(mainIntent, 0)
+            }
+
+            resolveInfos
+                .asSequence()
+                .mapNotNull { info ->
+                    val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                    if (pkg == context.packageName) return@mapNotNull null
+                    pkg to info
+                }
+                .distinctBy { it.first }
+                .map { (pkg, info) ->
+                    val label = info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg
+                    val iconBitmap = drawableToCompactImageBitmap(info.loadIcon(pm))
+                    InstalledAppInfo(
+                        label = label,
+                        packageName = pkg,
+                        iconBitmap = iconBitmap
+                    )
+                }
+                .sortedBy { it.label.lowercase() }
+                .toList()
+        }
 }

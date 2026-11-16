@@ -3,18 +3,14 @@ package com.kanso.focus.ui
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,9 +32,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -47,19 +45,29 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -67,14 +75,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +91,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -110,8 +119,7 @@ import com.kanso.focus.ui.theme.PureBlack
 import com.kanso.focus.ui.theme.PureWhite
 import com.kanso.focus.ui.theme.SurfaceElevated
 import com.kanso.focus.ui.theme.SurfaceZinc
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 
 data class InstalledAppInfo(
     val label: String,
@@ -163,19 +171,35 @@ fun KansoRootExperience() {
 fun NetflixProfileGatewayScreen(
     onProfilePicked: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val profiles by FocusSessionManager.profiles.collectAsState()
+    val profileImageVersion by FocusSessionManager.profileImageVersion.collectAsState()
+
     var isManageMode by remember { mutableStateOf(false) }
     var showAddProfileDialog by remember { mutableStateOf(false) }
     var newProfileName by remember { mutableStateOf("") }
-    var profilePendingDeletion by remember { mutableStateOf<String?>(null) }
+    var newProfileImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    val avatarGradients = listOf(
-        listOf(AccentIndigo, AccentViolet),
-        listOf(AccentEmerald, AccentCyan),
-        listOf(AccentAmber, AccentCoral),
-        listOf(AccentViolet, AccentCoral),
-        listOf(AccentCyan, AccentIndigo)
-    )
+    var profilePendingDeletion by remember { mutableStateOf<String?>(null) }
+    var profilePendingPhotoUpdate by remember { mutableStateOf<String?>(null) }
+
+    val existingProfilePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        val targetProfile = profilePendingPhotoUpdate
+        if (uri != null && targetProfile != null) {
+            FocusSessionManager.setProfileImageFromUri(context, targetProfile, uri)
+        }
+        profilePendingPhotoUpdate = null
+    }
+
+    val newProfilePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            newProfileImageUri = uri
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -185,17 +209,18 @@ fun NetflixProfileGatewayScreen(
                     listOf(PureBlack, SurfaceZinc, PureBlack)
                 )
             )
-            .padding(24.dp)
+            .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
+            // Logo K blanca sobre fondo negro
             Box(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(58.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color.Black)
                     .border(1.5.dp, PureWhite.copy(alpha = 0.85f), RoundedCornerShape(16.dp)),
@@ -204,7 +229,7 @@ fun NetflixProfileGatewayScreen(
                 Text(
                     text = "K",
                     color = PureWhite,
-                    fontSize = 30.sp,
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.ExtraBold,
                     fontFamily = FontFamily.SansSerif
                 )
@@ -215,16 +240,16 @@ fun NetflixProfileGatewayScreen(
             Text(
                 text = "KANSO",
                 color = PureWhite,
-                fontSize = 24.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace,
                 letterSpacing = 5.sp
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = if (isManageMode) "Administrar perfiles" else "¿Qué perfil vas a usar?",
+                text = if (isManageMode) "Administrar perfiles" else "¿Quién se va a concentrar?",
                 color = PureWhite,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
@@ -235,85 +260,123 @@ fun NetflixProfileGatewayScreen(
 
             Text(
                 text = if (isManageMode) {
-                    "Toca el icono de papelera en cualquier perfil para eliminarlo"
+                    "Toca la cámara para poner foto o la papelera para borrar un perfil"
                 } else {
-                    "Cada perfil guarda sus propias apps bloqueadas y silenciadas"
+                    "Toca un perfil para entrar o el icono de cámara para ponerle tu foto"
                 },
                 color = MutedGray,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(26.dp))
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 items(profiles, key = { it }) { profile ->
-                    val colorPair = avatarGradients[kotlin.math.abs(profile.hashCode()) % avatarGradients.size]
                     val canDelete = profiles.size > 1
+                    val avatarBitmap = remember(profile, profileImageVersion) {
+                        FocusSessionManager.getProfileAvatar(profile)
+                    }
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Box(
-                            modifier = Modifier
-                                .size(116.dp)
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Brush.linearGradient(colorPair))
-                                .border(
-                                    width = 2.dp,
-                                    color = if (isManageMode) AccentCoral else PureWhite.copy(alpha = 0.25f),
-                                    shape = RoundedCornerShape(24.dp)
-                                )
-                                .clickable {
-                                    if (isManageMode) {
-                                        if (canDelete) {
-                                            profilePendingDeletion = profile
-                                        }
-                                    } else {
-                                        onProfilePicked(profile)
-                                    }
-                                },
+                            modifier = Modifier.size(124.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = profile.take(2).uppercase(),
-                                color = PureWhite,
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.SansSerif
-                            )
+                            // Tarjeta cuadrada redondeada del perfil
+                            Box(
+                                modifier = Modifier
+                                    .size(116.dp)
+                                    .clip(RoundedCornerShape(26.dp))
+                                    .background(Brush.linearGradient(profileGradientFor(profile)))
+                                    .border(
+                                        width = 2.dp,
+                                        color = if (isManageMode) AccentCoral else PureWhite.copy(alpha = 0.28f),
+                                        shape = RoundedCornerShape(26.dp)
+                                    )
+                                    .clickable {
+                                        if (isManageMode) {
+                                            if (canDelete) {
+                                                profilePendingDeletion = profile
+                                            }
+                                        } else {
+                                            onProfilePicked(profile)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (avatarBitmap != null) {
+                                    Image(
+                                        bitmap = avatarBitmap,
+                                        contentDescription = profile,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Text(
+                                        text = profile.take(2).uppercase(),
+                                        color = PureWhite,
+                                        fontSize = 36.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
 
-                            if (isManageMode && canDelete) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(PureBlack.copy(alpha = 0.55f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                if (isManageMode && canDelete) {
                                     Box(
                                         modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(AccentCoral),
+                                            .fillMaxSize()
+                                            .background(PureBlack.copy(alpha = 0.58f)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Eliminar perfil",
-                                            tint = PureWhite,
-                                            modifier = Modifier.size(24.dp)
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(AccentCoral),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Eliminar perfil",
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
                                     }
                                 }
+                            }
+
+                            // Botón flotante de cámara en la esquina inferior derecha para poner/cambiar foto
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(SurfaceElevated)
+                                    .border(1.5.dp, PureWhite.copy(alpha = 0.6f), CircleShape)
+                                    .clickable {
+                                        profilePendingPhotoUpdate = profile
+                                        existingProfilePhotoLauncher.launch("image/*")
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Cambiar foto de $profile",
+                                    tint = PureWhite,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
 
@@ -330,7 +393,7 @@ fun NetflixProfileGatewayScreen(
                     }
                 }
 
-                // Tarjeta para Añadir Perfil estilo Netflix
+                // Tarjeta para Añadir Perfil
                 item {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -339,10 +402,14 @@ fun NetflixProfileGatewayScreen(
                         Box(
                             modifier = Modifier
                                 .size(116.dp)
-                                .clip(RoundedCornerShape(24.dp))
+                                .clip(RoundedCornerShape(26.dp))
                                 .background(SurfaceElevated)
-                                .border(2.dp, BorderZinc, RoundedCornerShape(24.dp))
-                                .clickable { showAddProfileDialog = true },
+                                .border(2.dp, BorderZinc, RoundedCornerShape(26.dp))
+                                .clickable {
+                                    newProfileName = ""
+                                    newProfileImageUri = null
+                                    showAddProfileDialog = true
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -353,7 +420,7 @@ fun NetflixProfileGatewayScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Text(
                             text = "Añadir perfil",
@@ -365,19 +432,19 @@ fun NetflixProfileGatewayScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             OutlinedButton(
                 onClick = { isManageMode = !isManageMode },
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, if (isManageMode) AccentEmerald else BorderZinc),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (isManageMode) AccentEmerald.copy(alpha = 0.15f) else SurfaceElevated,
+                    containerColor = if (isManageMode) AccentEmerald.copy(alpha = 0.16f) else SurfaceElevated,
                     contentColor = PureWhite
                 ),
                 modifier = Modifier
-                    .fillMaxWidth(0.75f)
-                    .height(48.dp)
+                    .fillMaxWidth(0.82f)
+                    .height(50.dp)
             ) {
                 Icon(
                     imageVector = if (isManageMode) Icons.Default.Check else Icons.Default.Edit,
@@ -388,11 +455,9 @@ fun NetflixProfileGatewayScreen(
                 Text(
                     text = if (isManageMode) "Listo" else "Administrar / Borrar perfiles",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+                    fontSize = 14.sp
                 )
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 
@@ -404,25 +469,59 @@ fun NetflixProfileGatewayScreen(
             textContentColor = PureWhite,
             title = { Text("Crear nuevo perfil", fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = newProfileName,
-                    onValueChange = { newProfileName = it },
-                    placeholder = { Text("Ej. Universidad, Gym, Noche...", color = MutedGray) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentIndigo,
-                        unfocusedBorderColor = BorderZinc,
-                        focusedTextColor = PureWhite,
-                        unfocusedTextColor = PureWhite
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = newProfileName,
+                        onValueChange = { newProfileName = it },
+                        placeholder = { Text("Ej. Universidad, Gym, Lectura...", color = MutedGray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentIndigo,
+                            unfocusedBorderColor = BorderZinc,
+                            focusedTextColor = PureWhite,
+                            unfocusedTextColor = PureWhite
+                        )
                     )
-                )
+
+                    OutlinedButton(
+                        onClick = { newProfilePhotoLauncher.launch("image/*") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (newProfileImageUri != null) AccentEmerald else BorderZinc
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = SurfaceZinc,
+                            contentColor = PureWhite
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = "Foto",
+                            tint = if (newProfileImageUri != null) AccentEmerald else PureWhite,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (newProfileImageUri != null) "Imagen seleccionada ✓" else "Elegir imagen de galería",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (newProfileName.isNotBlank()) {
-                            FocusSessionManager.addProfile(newProfileName)
+                            FocusSessionManager.addProfile(
+                                name = newProfileName,
+                                context = context,
+                                imageUri = newProfileImageUri
+                            )
                             newProfileName = ""
+                            newProfileImageUri = null
                             showAddProfileDialog = false
                         }
                     },
@@ -431,7 +530,7 @@ fun NetflixProfileGatewayScreen(
                         contentColor = PureWhite
                     )
                 ) {
-                    Text("Crear", fontWeight = FontWeight.Bold)
+                    Text("Crear perfil", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -452,7 +551,7 @@ fun NetflixProfileGatewayScreen(
             title = { Text("¿Eliminar perfil \"$target\"?", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "Se borrará este perfil junto con su configuración de aplicaciones bloqueadas y silenciadas.",
+                    "Se borrará este perfil junto con su foto y su configuración de aplicaciones bloqueadas y silenciadas.",
                     color = MutedGray,
                     fontSize = 13.sp
                 )
@@ -484,130 +583,368 @@ fun NetflixProfileGatewayScreen(
 fun KansoMainScreen(
     onSwitchProfileClicked: () -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Modo Enfoque, 1 = Lector Adaptado
-    val activeProfile by FocusSessionManager.activeProfile.collectAsState()
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var selectedSection by remember { mutableIntStateOf(0) } // 0 = Modo Enfoque, 1 = Lector Adaptado
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PureBlack)
-            .padding(top = 14.dp, bottom = 8.dp)
+    val activeProfile by FocusSessionManager.activeProfile.collectAsState()
+    val profileImageVersion by FocusSessionManager.profileImageVersion.collectAsState()
+    val activeAvatar = remember(activeProfile, profileImageVersion) {
+        FocusSessionManager.getProfileAvatar(activeProfile)
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = SurfaceZinc,
+                drawerContentColor = PureWhite,
+                modifier = Modifier.width(300.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 18.dp, vertical = 24.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        // Cabecera del menú lateral con Logo K y Perfil Activo con su foto
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.Black)
+                                    .border(1.5.dp, PureWhite, RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "K",
+                                    color = PureWhite,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "KANSO",
+                                    color = PureWhite,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 3.sp
+                                )
+                                Text(
+                                    text = "Menú de navegación",
+                                    color = MutedGray,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(22.dp))
+
+                        // Tarjeta del perfil activo dentro del menú lateral
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(SurfaceElevated)
+                                .border(1.dp, BorderZinc, RoundedCornerShape(16.dp))
+                                .clickable {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onSwitchProfileClicked()
+                                    }
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Brush.linearGradient(profileGradientFor(activeProfile))),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (activeAvatar != null) {
+                                        Image(
+                                            bitmap = activeAvatar,
+                                            contentDescription = activeProfile,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = activeProfile.take(2).uppercase(),
+                                            color = PureWhite,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = activeProfile,
+                                        color = PureWhite,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Toca para cambiar perfil",
+                                        color = MutedGray,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.SwitchAccount,
+                                contentDescription = "Cambiar perfil",
+                                tint = AccentIndigo,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+                        HorizontalDivider(color = BorderZinc)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "SECCIONES DE LA APP",
+                            color = MutedGray,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+
+                        NavigationDrawerItem(
+                            label = {
+                                Column {
+                                    Text(
+                                        text = "Modo Enfoque",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        text = "Bloqueo de apps y notificaciones",
+                                        fontSize = 11.sp,
+                                        color = MutedGray
+                                    )
+                                }
+                            },
+                            selected = selectedSection == 0,
+                            onClick = {
+                                selectedSection = 0
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = "Modo Enfoque"
+                                )
+                            },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = AccentIndigo.copy(alpha = 0.22f),
+                                unselectedContainerColor = Color.Transparent,
+                                selectedIconColor = AccentIndigo,
+                                unselectedIconColor = MutedGray,
+                                selectedTextColor = PureWhite,
+                                unselectedTextColor = PureWhite
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        NavigationDrawerItem(
+                            label = {
+                                Column {
+                                    Text(
+                                        text = "Lector Adaptado",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        text = "Dislexia, Poca Visión y 5 Voces",
+                                        fontSize = 11.sp,
+                                        color = MutedGray
+                                    )
+                                }
+                            },
+                            selected = selectedSection == 1,
+                            onClick = {
+                                selectedSection = 1
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.MenuBook,
+                                    contentDescription = "Lector Adaptado"
+                                )
+                            },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = AccentIndigo.copy(alpha = 0.22f),
+                                unselectedContainerColor = Color.Transparent,
+                                selectedIconColor = AccentIndigo,
+                                unselectedIconColor = MutedGray,
+                                selectedTextColor = PureWhite,
+                                unselectedTextColor = PureWhite
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                drawerState.close()
+                                onSwitchProfileClicked()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, BorderZinc),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = SurfaceElevated,
+                            contentColor = PureWhite
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SwitchAccount,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ir a pantalla de perfiles", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     ) {
-        // Barra Superior Premium con Perfil activo y Selector de Modo
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .background(PureBlack)
         ) {
-            // Botón de perfil actual para volver a la pantalla estilo Netflix
+            // Barra Superior con el botón de las 3 barritas (☰) en la esquina izquierda
+            // y el avatar del perfil con imagen en la esquina derecha
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(12.dp))
-                    .clickable { onSwitchProfileClicked() }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            Brush.linearGradient(listOf(AccentIndigo, AccentViolet))
-                        ),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Cambiar perfil",
-                        tint = PureWhite,
-                        modifier = Modifier.size(15.dp)
-                    )
+                    // Botón de las 3 barritas (Menú Hamburguesa) en la esquina
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                if (drawerState.isClosed) drawerState.open() else drawerState.close()
+                            }
+                        },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceElevated)
+                            .border(1.dp, BorderZinc, RoundedCornerShape(14.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Abrir menú de 3 barritas",
+                            tint = PureWhite,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = if (selectedSection == 0) "Modo Enfoque" else "Lector Adaptado",
+                            color = PureWhite,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Perfil $activeProfile",
+                            color = MutedGray,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
+
+                // Avatar del perfil en la esquina derecha con su foto personalizada
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SurfaceElevated)
+                        .border(1.dp, BorderZinc, RoundedCornerShape(14.dp))
+                        .clickable { onSwitchProfileClicked() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Brush.linearGradient(profileGradientFor(activeProfile))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (activeAvatar != null) {
+                            Image(
+                                bitmap = activeAvatar,
+                                contentDescription = activeProfile,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Text(
+                                text = activeProfile.take(2).uppercase(),
+                                color = PureWhite,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = activeProfile,
                         color = PureWhite,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "Cambiar perfil",
-                        color = MutedGray,
-                        fontSize = 9.sp
-                    )
                 }
             }
 
-            // Selector entre Modo Enfoque y Lector Adaptado
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceZinc)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(12.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                TopTabItem(
-                    title = "Enfoque",
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 }
-                )
-                TopTabItem(
-                    title = "Lector",
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 }
-                )
+            if (selectedSection == 0) {
+                FocusModeDashboard()
+            } else {
+                AdaptiveReaderScreen()
             }
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        if (selectedTab == 0) {
-            FocusModeDashboard(onSwitchProfileClicked = onSwitchProfileClicked)
-        } else {
-            AdaptiveReaderScreen()
-        }
     }
 }
 
 @Composable
-private fun TopTabItem(
-    title: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) AccentIndigo else Color.Transparent)
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = title,
-            color = if (selected) PureWhite else MutedGray,
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-        )
-    }
-}
-
-@Composable
-private fun FocusModeDashboard(
-    onSwitchProfileClicked: () -> Unit
-) {
+private fun FocusModeDashboard() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val activeProfile by FocusSessionManager.activeProfile.collectAsState()
     val restrictedPackages by FocusSessionManager.restrictedPackages.collectAsState()
     val mutedPackages by FocusSessionManager.mutedPackages.collectAsState()
+    val installedApps by FocusSessionManager.installedApps.collectAsState()
     val isSessionActive by FocusSessionManager.isSessionActive.collectAsState()
     val isStrictMode by FocusSessionManager.isStrictMode.collectAsState()
     val remainingSeconds by FocusSessionManager.remainingSeconds.collectAsState()
@@ -643,7 +980,6 @@ private fun FocusModeDashboard(
         }
     }
 
-    var installedApps by remember { mutableStateOf<List<InstalledAppInfo>>(emptyList()) }
     var activeGridPicker by remember { mutableStateOf(AppGridPickerType.NONE) }
     var showPermissionsSheet by remember { mutableStateOf(false) }
 
@@ -653,10 +989,6 @@ private fun FocusModeDashboard(
     var showScheduleDialog by remember { mutableStateOf(false) }
     var scheduleHourInput by remember { mutableStateOf(scheduleHour.toString()) }
     var scheduleMinuteInput by remember { mutableStateOf(String.format("%02d", scheduleMinute)) }
-
-    LaunchedEffect(Unit) {
-        installedApps = loadLaunchableAppsWithIcons(context)
-    }
 
     val canEnforceAppBlocking = hasAccessibilityPermission || (hasUsageStatsPermission && hasOverlayPermission)
 
@@ -681,22 +1013,24 @@ private fun FocusModeDashboard(
         return
     }
 
+    // Contenedor con scroll vertical fluido y excelente espaciado para que nada quede apretado
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Banner de estado de permisos interactivo si falta alguno para bloquear o silenciar
+        // Banner de permisos si falta alguno
         if (!canEnforceAppBlocking || !hasNotificationPermission) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .background(AccentAmber.copy(alpha = 0.14f))
-                    .border(1.dp, AccentAmber.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .border(1.dp, AccentAmber.copy(alpha = 0.6f), RoundedCornerShape(18.dp))
                     .clickable { showPermissionsSheet = true }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -708,44 +1042,46 @@ private fun FocusModeDashboard(
                         imageVector = Icons.Default.WarningAmber,
                         contentDescription = "Permisos",
                         tint = AccentAmber,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Configurar permisos de bloqueo",
+                            text = "Faltan permisos de bloqueo",
                             color = PureWhite,
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Toca aquí para habilitar el bloqueo real de apps y notificaciones",
+                            text = "Toca aquí para habilitar el bloqueo de apps y notificaciones",
                             color = MutedGray,
-                            fontSize = 11.sp
+                            fontSize = 12.sp
                         )
                     }
                 }
+                Spacer(modifier = Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(AccentAmber)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Text(
                         text = "Activar",
                         color = PureBlack,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
         }
 
-        // Tarjeta Principal de Encendido / Apagado (Power Hero Card)
+        // Tarjeta Principal de Encendido / Apagado (Power Hero Card) con amplio espacio interior
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(26.dp))
                 .background(
                     if (isSessionActive) {
                         Brush.linearGradient(
@@ -766,9 +1102,9 @@ private fun FocusModeDashboard(
                 .border(
                     width = 1.5.dp,
                     color = if (isSessionActive) AccentEmerald else BorderZinc,
-                    shape = RoundedCornerShape(24.dp)
+                    shape = RoundedCornerShape(26.dp)
                 )
-                .padding(20.dp)
+                .padding(horizontal = 22.dp, vertical = 24.dp)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -794,13 +1130,12 @@ private fun FocusModeDashboard(
                                 "APAGADO · LISTO PARA ENFOCAR"
                             },
                             color = if (isSessionActive) AccentEmerald else MutedGray,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                     }
 
-                    // Switch ON/OFF rápido para el modo libre
                     Switch(
                         checked = isSessionActive,
                         onCheckedChange = { wantOn ->
@@ -826,12 +1161,12 @@ private fun FocusModeDashboard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
                 // Botón Circular Grande Tipo Power ON / OFF
                 Box(
                     modifier = Modifier
-                        .size(108.dp)
+                        .size(118.dp)
                         .clip(CircleShape)
                         .background(
                             if (isSessionActive) {
@@ -846,7 +1181,7 @@ private fun FocusModeDashboard(
                         )
                         .border(
                             width = 3.dp,
-                            color = if (isSessionActive) AccentEmerald else AccentIndigo.copy(alpha = 0.7f),
+                            color = if (isSessionActive) AccentEmerald else AccentIndigo.copy(alpha = 0.75f),
                             shape = CircleShape
                         )
                         .clickable {
@@ -869,26 +1204,26 @@ private fun FocusModeDashboard(
                             imageVector = Icons.Default.PowerSettingsNew,
                             contentDescription = "Encender o Apagar",
                             tint = PureWhite,
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(42.dp)
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (isSessionActive) "ON" else "OFF",
                             color = PureWhite,
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.ExtraBold,
                             fontFamily = FontFamily.Monospace
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 if (isSessionActive && remainingSeconds > 0L) {
                     Text(
                         text = FocusSessionManager.formatRemainingTime(remainingSeconds),
                         color = PureWhite,
-                        fontSize = 32.sp,
+                        fontSize = 36.sp,
                         fontWeight = FontWeight.ExtraBold,
                         fontFamily = FontFamily.Monospace
                     )
@@ -901,16 +1236,17 @@ private fun FocusModeDashboard(
                         },
                         color = PureWhite,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // Botones de Temporizador Estricto y Programador Diario
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Button(
                         onClick = {
@@ -923,7 +1259,7 @@ private fun FocusModeDashboard(
                         enabled = !isSessionActive,
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp),
+                            .height(50.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentIndigo,
@@ -935,19 +1271,19 @@ private fun FocusModeDashboard(
                         Icon(
                             imageVector = Icons.Default.Timer,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Temporizador Estricto",
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
                     OutlinedButton(
                         onClick = { showScheduleDialog = true },
-                        modifier = Modifier.height(46.dp),
+                        modifier = Modifier.height(50.dp),
                         shape = RoundedCornerShape(14.dp),
                         border = BorderStroke(
                             1.dp,
@@ -962,70 +1298,72 @@ private fun FocusModeDashboard(
                             imageVector = Icons.Default.Schedule,
                             contentDescription = "Programar",
                             tint = if (scheduleEnabled) AccentEmerald else PureWhite,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
         }
 
-        // DOS CUADRADOS GRANDES SEPARADOS:
-        // 1) Cuadrado para Bloquear Apps (abre cuadrícula de 3 columnas)
-        // 2) Cuadrado para Silenciar Notificaciones (abre cuadrícula de 3 columnas)
+        // DOS CUADRADOS GRANDES SEPARADOS Y BIEN ESPACIADOS:
+        // 1) Bloquear Apps (abre cuadrícula de 3 columnas instantánea)
+        // 2) Silenciar Notificaciones (abre cuadrícula de 3 columnas instantánea)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Cuadrado 1: Bloquear Apps
             SquareActionTile(
                 modifier = Modifier.weight(1f),
                 title = "Bloquear Apps",
                 subtitle = "${restrictedPackages.size} bloqueadas",
-                badgeText = if (restrictedPackages.isNotEmpty()) "ACTIVO" else "ELEGIR",
+                badgeText = if (restrictedPackages.isNotEmpty()) "ACTIVO" else "ABRIR",
                 accentColor = AccentCoral,
                 icon = Icons.Default.Lock,
                 onClick = { activeGridPicker = AppGridPickerType.BLOCK_APPS }
             )
 
-            // Cuadrado 2: Silenciar Notificaciones
             SquareActionTile(
                 modifier = Modifier.weight(1f),
                 title = "Notificaciones",
                 subtitle = "${mutedPackages.size} silenciadas",
-                badgeText = if (mutedPackages.isNotEmpty()) "SILENCIO" else "ELEGIR",
+                badgeText = if (mutedPackages.isNotEmpty()) "SILENCIO" else "ABRIR",
                 accentColor = AccentViolet,
                 icon = Icons.Default.NotificationsOff,
                 onClick = { activeGridPicker = AppGridPickerType.MUTE_NOTIFICATIONS }
             )
         }
 
-        // Tarjeta de Estado de Permisos / Seguridad del Bloqueador
+        // Tarjeta de Permisos del Sistema
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
                 .background(SurfaceElevated)
-                .border(1.dp, BorderZinc, RoundedCornerShape(16.dp))
+                .border(1.dp, BorderZinc, RoundedCornerShape(18.dp))
                 .clickable { showPermissionsSheet = true }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Security,
                     contentDescription = null,
                     tint = if (canEnforceAppBlocking && hasNotificationPermission) AccentEmerald else AccentAmber,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(24.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(14.dp))
                 Column {
                     Text(
                         text = "Permisos del sistema y bloqueo",
                         color = PureWhite,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (canEnforceAppBlocking && hasNotificationPermission) {
                             "Todos los permisos activos correctamente"
@@ -1033,21 +1371,23 @@ private fun FocusModeDashboard(
                             "Toca para revisar o activar permisos en Android"
                         },
                         color = MutedGray,
-                        fontSize = 11.sp
+                        fontSize = 12.sp
                     )
                 }
             }
 
             Text(
-                text = "Ver",
+                text = "Configurar",
                 color = AccentIndigo,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
     }
 
-    // Modal de Permisos Guiados (soluciona que Kanso pueda bloquear siempre las apps)
+    // Modal de Permisos Guiados
     if (showPermissionsSheet) {
         AlertDialog(
             onDismissRequest = { showPermissionsSheet = false },
@@ -1067,7 +1407,7 @@ private fun FocusModeDashboard(
 
                     PermissionToggleRow(
                         title = "1. Mostrar sobre otras apps",
-                        subtitle = "Permite mostrar la pantalla negra de bloqueo.",
+                        subtitle = "Permite mostrar la pantalla de bloqueo encima.",
                         isGranted = hasOverlayPermission,
                         onClick = {
                             val intent = Intent(
@@ -1280,19 +1620,19 @@ private fun SquareActionTile(
 ) {
     Column(
         modifier = modifier
-            .aspectRatio(1.05f)
-            .clip(RoundedCornerShape(22.dp))
+            .height(152.dp)
+            .clip(RoundedCornerShape(24.dp))
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        accentColor.copy(alpha = 0.18f),
+                        accentColor.copy(alpha = 0.2f),
                         SurfaceElevated
                     )
                 )
             )
-            .border(1.5.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(22.dp))
+            .border(1.5.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(24.dp))
             .clickable { onClick() }
-            .padding(16.dp),
+            .padding(18.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
@@ -1302,7 +1642,7 @@ private fun SquareActionTile(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(46.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(accentColor.copy(alpha = 0.25f)),
                 contentAlignment = Alignment.Center
@@ -1363,38 +1703,36 @@ private fun AppGridPickerModal(
     val isBlockingPicker = pickerType == AppGridPickerType.BLOCK_APPS
     val accentColor = if (isBlockingPicker) AccentCoral else AccentViolet
 
-    val filteredApps = remember(installedApps, searchQuery, selectedPackages) {
+    val filteredApps = remember(installedApps, searchQuery) {
         val q = searchQuery.trim().lowercase()
-        val matching = if (q.isEmpty()) {
+        if (q.isEmpty()) {
             installedApps
         } else {
             installedApps.filter {
                 it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q)
             }
         }
-        matching.sortedWith(
-            compareByDescending<InstalledAppInfo> { selectedPackages.contains(it.packageName) }
-                .thenBy { it.label.lowercase() }
-        )
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(PureBlack)
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = 18.dp, vertical = 8.dp)
     ) {
-        // Cabecera de la vista de cuadrícula de 3 columnas
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(42.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(SurfaceElevated)
                         .border(1.dp, BorderZinc, RoundedCornerShape(12.dp))
@@ -1414,12 +1752,14 @@ private fun AppGridPickerModal(
                         fontWeight = FontWeight.ExtraBold
                     )
                     Text(
-                        text = "Toca cualquier cuadrado para ${if (isBlockingPicker) "bloquear o desbloquear" else "silenciar o activar"}",
+                        text = "Toca un cuadrado para ${if (isBlockingPicker) "bloquear o desbloquear" else "silenciar o activar"}",
                         color = MutedGray,
                         fontSize = 11.sp
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Box(
                 modifier = Modifier
@@ -1437,13 +1777,13 @@ private fun AppGridPickerModal(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             placeholder = {
-                Text("Buscar app...", color = MutedGray, fontSize = 13.sp)
+                Text("Buscar aplicación...", color = MutedGray, fontSize = 13.sp)
             },
             leadingIcon = {
                 Icon(
@@ -1466,24 +1806,28 @@ private fun AppGridPickerModal(
             )
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Cuadrícula de 3 columnas con cuadrados de icono + nombre abajo
+        // Cuadrícula rápida de 3 columnas con cuadrados de icono + nombre abajo
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 20.dp)
         ) {
-            items(filteredApps, key = { it.packageName }) { app ->
+            items(
+                items = filteredApps,
+                key = { it.packageName },
+                contentType = { "app_tile" }
+            ) { app ->
                 val isSelected = selectedPackages.contains(app.packageName)
 
                 Box(
                     modifier = Modifier
-                        .aspectRatio(0.92f)
+                        .aspectRatio(0.9f)
                         .clip(RoundedCornerShape(18.dp))
                         .background(
                             if (isSelected) accentColor.copy(alpha = 0.22f)
@@ -1497,7 +1841,6 @@ private fun AppGridPickerModal(
                         .clickable { onTogglePackage(app.packageName) }
                         .padding(10.dp)
                 ) {
-                    // Indicador superior derecho ON/OFF
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -1629,6 +1972,17 @@ private fun PermissionToggleRow(
     }
 }
 
+private fun profileGradientFor(profile: String): List<Color> {
+    val gradients = listOf(
+        listOf(AccentIndigo, AccentViolet),
+        listOf(AccentEmerald, AccentCyan),
+        listOf(AccentAmber, AccentCoral),
+        listOf(AccentViolet, AccentCoral),
+        listOf(AccentCyan, AccentIndigo)
+    )
+    return gradients[kotlin.math.abs(profile.hashCode()) % gradients.size]
+}
+
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
     val expectedComponentName = ComponentName(context, FocusAccessibilityService::class.java)
     val enabledServices = Settings.Secure.getString(
@@ -1645,53 +1999,3 @@ private fun isNotificationListenerEnabled(context: Context): Boolean {
     return NotificationManagerCompat.getEnabledListenerPackages(context)
         .contains(context.packageName)
 }
-
-private fun drawableToImageBitmap(drawable: Drawable): ImageBitmap? {
-    return try {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) {
-            return drawable.bitmap.asImageBitmap()
-        }
-        val width = drawable.intrinsicWidth.coerceAtLeast(1).coerceAtMost(144)
-        val height = drawable.intrinsicHeight.coerceAtLeast(1).coerceAtMost(144)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        bitmap.asImageBitmap()
-    } catch (_: Exception) {
-        null
-    }
-}
-
-private suspend fun loadLaunchableAppsWithIcons(context: Context): List<InstalledAppInfo> =
-    withContext(Dispatchers.IO) {
-        val pm = context.packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.queryIntentActivities(mainIntent, 0)
-        }
-
-        resolveInfos
-            .mapNotNull { info ->
-                val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
-                if (pkg == context.packageName) return@mapNotNull null
-                val label = info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg
-                val iconBitmap = try {
-                    drawableToImageBitmap(info.loadIcon(pm))
-                } catch (_: Exception) {
-                    null
-                }
-                InstalledAppInfo(
-                    label = label,
-                    packageName = pkg,
-                    iconBitmap = iconBitmap
-                )
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
-    }
