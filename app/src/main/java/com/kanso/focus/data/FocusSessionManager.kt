@@ -8,11 +8,11 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
@@ -52,6 +52,14 @@ object FocusSessionManager {
     private const val KEY_SCHEDULE_STRICT = "schedule_strict"
 
     private val defaultProfiles = listOf("Estudio", "Trabajo", "Descanso")
+
+    private val suggestedKeywords = listOf(
+        "instagram", "tiktok", "musically", "zhiliaoapp", "youtube", "facebook",
+        "katana", "orca", "twitter", "whatsapp", "snapchat", "reddit", "discord",
+        "twitch", "netflix", "pinterest", "threads", "telegram", "roblox",
+        "supercell", "brawlstars", "clash", "freefire", "genshin", "pubg",
+        "minecraft", "ea.game", "gameloft", "zynga", "king.candycrush"
+    )
 
     private var appContext: Context? = null
     private var prefs: SharedPreferences? = null
@@ -120,7 +128,7 @@ object FocusSessionManager {
         restoreSessionState()
         ensureForegroundMonitor()
         preloadInstalledAppsIfNeeded(appCtx)
-        preloadProfileAvatars(appCtx)
+        preloadProfileAvatars()
     }
 
     private fun preloadInstalledAppsIfNeeded(context: Context) {
@@ -131,7 +139,7 @@ object FocusSessionManager {
         }
     }
 
-    private fun preloadProfileAvatars(context: Context) {
+    private fun preloadProfileAvatars() {
         scope.launch(Dispatchers.IO) {
             _profiles.value.forEach { profile ->
                 val path = prefs?.getString(profileImageKey(profile), null)
@@ -281,16 +289,50 @@ object FocusSessionManager {
         prefs?.edit()?.putStringSet(mutedKey(_activeProfile.value), current)?.apply()
     }
 
+    fun selectSuggestedPackages(forBlocking: Boolean) {
+        val suggested = _installedApps.value
+            .filter { app ->
+                app.isSuggestedDistraction ||
+                        suggestedKeywords.any { kw ->
+                            app.packageName.contains(kw, ignoreCase = true) ||
+                                    app.label.contains(kw, ignoreCase = true)
+                        }
+            }
+            .map { it.packageName }
+            .toSet()
+
+        if (forBlocking) {
+            val merged = _restrictedPackages.value + suggested
+            _restrictedPackages.value = merged
+            prefs?.edit()?.putStringSet(restrictedKey(_activeProfile.value), merged)?.apply()
+        } else {
+            val merged = _mutedPackages.value + suggested
+            _mutedPackages.value = merged
+            prefs?.edit()?.putStringSet(mutedKey(_activeProfile.value), merged)?.apply()
+        }
+    }
+
+    fun clearAllSelectedPackages(forBlocking: Boolean) {
+        if (forBlocking) {
+            _restrictedPackages.value = emptySet()
+            prefs?.edit()?.putStringSet(restrictedKey(_activeProfile.value), emptySet())?.apply()
+        } else {
+            _mutedPackages.value = emptySet()
+            prefs?.edit()?.putStringSet(mutedKey(_activeProfile.value), emptySet())?.apply()
+        }
+    }
+
     fun startStrictTimedSession(minutes: Int) {
         val validMinutes = minutes.coerceAtLeast(1)
         val endMillis = System.currentTimeMillis() + validMinutes * 60_000L
         _isStrictMode.value = true
         _isSessionActive.value = true
+        // commit() sincrónico para garantizar persistencia ante reinicios forzados
         prefs?.edit()
             ?.putBoolean(KEY_IS_ACTIVE, true)
             ?.putBoolean(KEY_IS_STRICT, true)
             ?.putLong(KEY_END_TIME, endMillis)
-            ?.apply()
+            ?.commit()
         startCountdownLoop(endMillis)
         ensureForegroundMonitor()
     }
@@ -307,7 +349,7 @@ object FocusSessionManager {
             ?.putBoolean(KEY_IS_ACTIVE, true)
             ?.putBoolean(KEY_IS_STRICT, false)
             ?.putLong(KEY_END_TIME, endMillis)
-            ?.apply()
+            ?.commit()
         if (endMillis > 0L) {
             startCountdownLoop(endMillis)
         } else {
@@ -338,7 +380,7 @@ object FocusSessionManager {
             ?.putBoolean(KEY_IS_ACTIVE, false)
             ?.putBoolean(KEY_IS_STRICT, false)
             ?.putLong(KEY_END_TIME, 0L)
-            ?.apply()
+            ?.commit()
     }
 
     private fun restoreSessionState() {
@@ -615,10 +657,18 @@ object FocusSessionManager {
                 .map { (pkg, info) ->
                     val label = info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg
                     val iconBitmap = drawableToCompactImageBitmap(info.loadIcon(pm))
+                    val appCategory = info.activityInfo?.applicationInfo?.category ?: ApplicationInfo.CATEGORY_UNDEFINED
+                    val isSocialOrGame = appCategory == ApplicationInfo.CATEGORY_GAME ||
+                            appCategory == ApplicationInfo.CATEGORY_SOCIAL ||
+                            appCategory == ApplicationInfo.CATEGORY_VIDEO ||
+                            suggestedKeywords.any { kw ->
+                                pkg.contains(kw, ignoreCase = true) || label.contains(kw, ignoreCase = true)
+                            }
                     InstalledAppInfo(
                         label = label,
                         packageName = pkg,
-                        iconBitmap = iconBitmap
+                        iconBitmap = iconBitmap,
+                        isSuggestedDistraction = isSocialOrGame
                     )
                 }
                 .sortedBy { it.label.lowercase() }

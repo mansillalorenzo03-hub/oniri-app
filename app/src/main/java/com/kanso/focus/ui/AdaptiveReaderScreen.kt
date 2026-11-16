@@ -1,8 +1,11 @@
 package com.kanso.focus.ui
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -13,43 +16,62 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -67,6 +89,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -78,6 +101,7 @@ import com.kanso.focus.ui.theme.AccentIndigo
 import com.kanso.focus.ui.theme.AccentViolet
 import com.kanso.focus.ui.theme.BorderZinc
 import com.kanso.focus.ui.theme.MutedGray
+import com.kanso.focus.ui.theme.OpticalYellow
 import com.kanso.focus.ui.theme.PureBlack
 import com.kanso.focus.ui.theme.PureWhite
 import com.kanso.focus.ui.theme.SurfaceElevated
@@ -93,115 +117,130 @@ import java.io.InputStreamReader
 import java.util.Locale
 import kotlin.math.ceil
 
-val OpticalYellow = Color(0xFFFFD600)
-
-data class KansoVoicePreset(
-    val index: Int,
+data class KansoVoiceProfile(
     val id: String,
     val name: String,
-    val subtitle: String,
-    val pitch: Float,
-    val rateMultiplier: Float,
-    val localeCountry: String,
-    val preferFemale: Boolean?,
+    val description: String,
+    val preferredRegions: List<String>,
+    val preferMale: Boolean,
+    val cadenceMultiplier: Float,
+    val subtlePitch: Float,
     val accentColor: Color
 )
 
-private val voicePresets = listOf(
-    KansoVoicePreset(
-        index = 0,
-        id = "natural",
-        name = "1. Humana",
-        subtitle = "Natural cálida",
-        pitch = 1.00f,
-        rateMultiplier = 1.00f,
-        localeCountry = "MX",
-        preferFemale = true,
+private val voiceProfilesCatalog = listOf(
+    KansoVoiceProfile(
+        id = "humana",
+        name = "Humana",
+        description = "Voz natural cálida en español (es-419 / es-MX de alta fidelidad)",
+        preferredRegions = listOf("419", "MX", "US", "ES"),
+        preferMale = false,
+        cadenceMultiplier = 1.00f,
+        subtlePitch = 1.00f,
         accentColor = AccentEmerald
     ),
-    KansoVoicePreset(
-        index = 1,
-        id = "female",
-        name = "2. Mujer",
-        subtitle = "Suave y clara",
-        pitch = 1.42f,
-        rateMultiplier = 1.04f,
-        localeCountry = "ES",
-        preferFemale = true,
+    KansoVoiceProfile(
+        id = "mujer",
+        name = "Mujer",
+        description = "Voz femenina nativa de España (es-ES de alta claridad)",
+        preferredRegions = listOf("ES", "MX", "US"),
+        preferMale = false,
+        cadenceMultiplier = 1.02f,
+        subtlePitch = 1.05f,
         accentColor = AccentViolet
     ),
-    KansoVoicePreset(
-        index = 2,
-        id = "deep",
-        name = "3. Grave",
-        subtitle = "Profunda firme",
-        pitch = 0.58f,
-        rateMultiplier = 0.92f,
-        localeCountry = "US",
-        preferFemale = false,
+    KansoVoiceProfile(
+        id = "grave",
+        name = "Grave",
+        description = "Voz masculina con resonancia baja real asignada por paquete masculino",
+        preferredRegions = listOf("ES", "US", "MX", "AR"),
+        preferMale = true,
+        cadenceMultiplier = 0.95f,
+        subtlePitch = 0.92f,
         accentColor = AccentIndigo
     ),
-    KansoVoicePreset(
-        index = 3,
-        id = "narrator",
-        name = "4. Narrador",
-        subtitle = "Barítono pausado",
-        pitch = 0.76f,
-        rateMultiplier = 0.78f,
-        localeCountry = "AR",
-        preferFemale = false,
+    KansoVoiceProfile(
+        id = "narrador",
+        name = "Narrador",
+        description = "Voz masculina neutra y pausada para lectura guiada (es-AR / es-US)",
+        preferredRegions = listOf("AR", "US", "419", "MX", "ES"),
+        preferMale = true,
+        cadenceMultiplier = 0.90f,
+        subtlePitch = 0.96f,
         accentColor = AccentAmber
     ),
-    KansoVoicePreset(
-        index = 4,
-        id = "bright",
-        name = "5. Juvenil",
-        subtitle = "Aguda dinámica",
-        pitch = 1.66f,
-        rateMultiplier = 1.15f,
-        localeCountry = "ES",
-        preferFemale = true,
+    KansoVoiceProfile(
+        id = "juvenil",
+        name = "Juvenil",
+        description = "Voz alternativa con cadencia más ágil y dinámica",
+        preferredRegions = listOf("MX", "ES", "US", "CO"),
+        preferMale = false,
+        cadenceMultiplier = 1.08f,
+        subtlePitch = 1.08f,
         accentColor = AccentCyan
     )
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdaptiveReaderScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lazyListState = rememberLazyListState()
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     var selectedMode by remember { mutableStateOf(ReaderAccessibilityMode.BOTH) }
     var fontSizeSp by remember { mutableFloatStateOf(19f) }
     var highContrastYellow by remember { mutableStateOf(false) }
-    var limitToThreePages by remember { mutableStateOf(false) }
     var speechRate by remember { mutableFloatStateOf(1.0f) }
-    var selectedVoicePreset by remember { mutableStateOf(voicePresets.first()) }
+    var selectedProfile by remember { mutableStateOf(voiceProfilesCatalog.first()) }
 
-    var documentTitle by remember { mutableStateOf("Texto de demostración Kanso") }
+    var showSettingsBottomSheet by remember { mutableStateOf(false) }
+    var showExportPdfDialog by remember { mutableStateOf(false) }
+    var limitToThreePages by remember { mutableStateOf(false) }
+
+    var documentTitle by remember { mutableStateOf("Lectura Adaptada Kanso") }
     var microBlocks by remember {
         mutableStateOf(
             splitIntoMicroBlocks(
                 "Kanso divide documentos densos en micro-bloques numerados para reducir la fatiga cognitiva y visual. " +
                         "En el modo Dislexia se aplica lectura biónica resaltando la raíz inicial de cada palabra para guiar la fijación ocular. " +
                         "En el modo Poca Visión se amplía la escala tipográfica y todos los números como 2025, 15% o 3 páginas se destacan un 15% más grandes en negrita. " +
-                        "Prueba cualquiera de las 5 voces arriba (Humana, Mujer, Grave, Narrador o Juvenil) para sentir el cambio inmediato de timbre, tono y cadencia."
+                        "Usa el reproductor inferior para escuchar con sincronización Karaoke en vivo, o abre el botón de ajustes arriba a la derecha para cambiar entre las 5 voces neuronales reales."
             )
         )
     }
+
     var isLoadingFile by remember { mutableStateOf(false) }
     var speakingBlockIndex by remember { mutableIntStateOf(-1) }
+    var pausedBlockIndex by remember { mutableIntStateOf(0) }
+    var isPaused by remember { mutableStateOf(false) }
+
     var ttsReady by remember { mutableStateOf(false) }
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+    var mappedVoicesByProfile by remember { mutableStateOf<Map<String, Voice>>(emptyMap()) }
+    var hasHighQualityVoices by remember { mutableStateOf(true) }
 
+    // Inicialización priorizando el motor de Google TTS para máxima calidad neuronal
     DisposableEffect(context) {
         var instance: TextToSpeech? = null
-        instance = TextToSpeech(context.applicationContext) { status ->
+        val initListener = TextToSpeech.OnInitListener { status ->
             if (status == TextToSpeech.SUCCESS) {
-                instance?.language = Locale("es", "ES")
-                ttsEngine = instance
+                val engine = instance ?: return@OnInitListener
+                val mappingResult = mapRealHighFidelityVoices(engine)
+                mappedVoicesByProfile = mappingResult.first
+                hasHighQualityVoices = mappingResult.second
+                ttsEngine = engine
                 ttsReady = true
             }
         }
+
+        instance = try {
+            TextToSpeech(context.applicationContext, initListener, "com.google.android.tts")
+        } catch (_: Exception) {
+            TextToSpeech(context.applicationContext, initListener)
+        }
+
         onDispose {
             instance?.stop()
             instance?.shutdown()
@@ -209,17 +248,32 @@ fun AdaptiveReaderScreen() {
         }
     }
 
-    fun speakBlockWithPreset(
+    // Auto-scroll suave tipo Karaoke cuando avanza el bloque en reproducción
+    LaunchedEffect(speakingBlockIndex) {
+        if (speakingBlockIndex in microBlocks.indices) {
+            lazyListState.animateScrollToItem(speakingBlockIndex)
+        }
+    }
+
+    fun speakBlock(
         blockIndex: Int,
-        preset: KansoVoicePreset = selectedVoicePreset,
-        baseRate: Float = speechRate
+        profile: KansoVoiceProfile = selectedProfile,
+        rate: Float = speechRate
     ) {
         val engine = ttsEngine ?: return
         if (!ttsReady || blockIndex !in microBlocks.indices) return
 
-        engine.stop()
-        configureDistinctVoice(engine, preset, baseRate)
+        isPaused = false
+        pausedBlockIndex = blockIndex
         speakingBlockIndex = blockIndex
+
+        engine.stop()
+        applyRealVoiceProfile(
+            tts = engine,
+            profile = profile,
+            mappedVoice = mappedVoicesByProfile[profile.id],
+            userSpeed = rate
+        )
 
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
@@ -228,39 +282,65 @@ fun AdaptiveReaderScreen() {
             microBlocks[blockIndex],
             TextToSpeech.QUEUE_FLUSH,
             params,
-            "block_${blockIndex}_${preset.id}"
+            "karaoke_${blockIndex}_${profile.id}"
         )
     }
 
-    DisposableEffect(ttsEngine, selectedVoicePreset, speechRate, microBlocks) {
+    fun pauseSpeech() {
+        val engine = ttsEngine ?: return
+        if (speakingBlockIndex != -1) {
+            pausedBlockIndex = speakingBlockIndex
+            isPaused = true
+            speakingBlockIndex = -1
+            engine.stop()
+        }
+    }
+
+    fun stopSpeech() {
+        val engine = ttsEngine ?: return
+        isPaused = false
+        pausedBlockIndex = 0
+        speakingBlockIndex = -1
+        engine.stop()
+    }
+
+    DisposableEffect(ttsEngine, selectedProfile, speechRate, microBlocks) {
         val engine = ttsEngine ?: return@DisposableEffect onDispose {}
         val listener = object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {
-                val parts = utteranceId?.removePrefix("block_")?.split("_")
-                val idx = parts?.firstOrNull()?.toIntOrNull()
+            override fun onStart(utteranceId: String?) {
+                val idx = parseBlockIndexFromUtterance(utteranceId)
                 if (idx != null) {
-                    val next = idx + 1
-                    if (next < microBlocks.size) {
-                        speakingBlockIndex = next
-                        configureDistinctVoice(engine, selectedVoicePreset, speechRate)
-                        engine.speak(
-                            microBlocks[next],
-                            TextToSpeech.QUEUE_FLUSH,
-                            null,
-                            "block_${next}_${selectedVoicePreset.id}"
-                        )
+                    mainHandler.post {
+                        speakingBlockIndex = idx
+                        pausedBlockIndex = idx
+                        isPaused = false
+                    }
+                }
+            }
+
+            override fun onDone(utteranceId: String?) {
+                val idx = parseBlockIndexFromUtterance(utteranceId)
+                mainHandler.post {
+                    if (isPaused) return@post
+                    if (idx != null) {
+                        val next = idx + 1
+                        if (next < microBlocks.size) {
+                            speakBlock(next, selectedProfile, speechRate)
+                        } else {
+                            speakingBlockIndex = -1
+                            pausedBlockIndex = 0
+                        }
                     } else {
                         speakingBlockIndex = -1
                     }
-                } else {
-                    speakingBlockIndex = -1
                 }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                speakingBlockIndex = -1
+                mainHandler.post {
+                    speakingBlockIndex = -1
+                }
             }
         }
         engine.setOnUtteranceProgressListener(listener)
@@ -271,6 +351,7 @@ fun AdaptiveReaderScreen() {
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
+            stopSpeech()
             isLoadingFile = true
             scope.launch {
                 val (name, extracted) = extractDocumentText(context, uri)
@@ -281,77 +362,27 @@ fun AdaptiveReaderScreen() {
         }
     }
 
-    val activeTextColor = if (highContrastYellow) OpticalYellow else PureWhite
-    val activeCardBg = if (highContrastYellow) PureBlack else SurfaceElevated
-    val activeBorderColor = if (highContrastYellow) OpticalYellow else BorderZinc
-
     val effectiveFontSize = when (selectedMode) {
         ReaderAccessibilityMode.DYSLEXIA -> fontSizeSp
-        ReaderAccessibilityMode.LOW_VISION, ReaderAccessibilityMode.BOTH -> (fontSizeSp * 1.2f).coerceAtMost(38f)
+        ReaderAccessibilityMode.LOW_VISION, ReaderAccessibilityMode.BOTH -> (fontSizeSp * 1.18f).coerceAtMost(36f)
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PureBlack),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // 1. Selector de Modo de Accesibilidad con buen espacio
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(SurfaceZinc)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(20.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+    Scaffold(
+        containerColor = PureBlack,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            // Barra de acciones superior limpia y sin textos truncados
+            Surface(
+                color = SurfaceZinc,
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "MODO DE LECTURA ADAPTADA",
-                    color = MutedGray,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.2.sp
-                )
-
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PureBlack)
-                        .border(1.dp, BorderZinc, RoundedCornerShape(14.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    ReaderAccessibilityMode.values().forEach { mode ->
-                        val isSelected = selectedMode == mode
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) AccentIndigo else Color.Transparent)
-                                .clickable { selectedMode = mode }
-                                .padding(vertical = 11.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = mode.label,
-                                color = if (isSelected) PureWhite else MutedGray,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                // Controles de Archivo y Tipografía (Subir PDF/TXT, A-, A+, Contraste Amarillo)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
                         onClick = {
@@ -359,9 +390,10 @@ fun AdaptiveReaderScreen() {
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp),
+                            .height(44.dp),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, BorderZinc),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = SurfaceElevated,
                             contentColor = PureWhite
@@ -372,223 +404,230 @@ fun AdaptiveReaderScreen() {
                             contentDescription = "Subir PDF o TXT",
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "Subir PDF / TXT", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    OutlinedButton(
-                        onClick = { fontSizeSp = (fontSizeSp - 2f).coerceAtLeast(14f) },
-                        modifier = Modifier.height(46.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, BorderZinc),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = SurfaceElevated,
-                            contentColor = PureWhite
-                        )
-                    ) {
-                        Text("A-", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = { fontSizeSp = (fontSizeSp + 2f).coerceAtMost(32f) },
-                        modifier = Modifier.height(46.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, BorderZinc),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = SurfaceElevated,
-                            contentColor = PureWhite
-                        )
-                    ) {
-                        Text("A+", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    IconButton(
-                        onClick = { highContrastYellow = !highContrastYellow },
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (highContrastYellow) OpticalYellow else SurfaceElevated)
-                            .border(
-                                1.dp,
-                                if (highContrastYellow) OpticalYellow else BorderZinc,
-                                RoundedCornerShape(12.dp)
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Contrast,
-                            contentDescription = "Contraste Amarillo Óptico",
-                            tint = if (highContrastYellow) PureBlack else OpticalYellow
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Panel de 5 Voces Distintas y Velocidad de Lectura
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(SurfaceZinc)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(20.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.RecordVoiceOver,
-                            contentDescription = "Voces",
-                            tint = selectedVoicePreset.accentColor,
-                            modifier = Modifier.size(18.dp)
-                        )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "ELIGE ENTRE 5 VOCES",
-                                color = PureWhite,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = "Toca una voz para escucharla al instante",
-                                color = MutedGray,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Text(
+                            text = "Subir PDF / TXT",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     Button(
-                        onClick = {
-                            if (speakingBlockIndex != -1) {
-                                ttsEngine?.stop()
-                                speakingBlockIndex = -1
-                            } else {
-                                speakBlockWithPreset(0, selectedVoicePreset, speechRate)
-                            }
-                        },
+                        onClick = { showExportPdfDialog = true },
+                        modifier = Modifier.height(44.dp),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (speakingBlockIndex != -1) AccentAmber else AccentEmerald,
-                            contentColor = PureBlack
+                            containerColor = AccentIndigo,
+                            contentColor = PureWhite
                         )
                     ) {
                         Icon(
-                            imageVector = if (speakingBlockIndex != -1) Icons.Default.Stop else Icons.Default.PlayArrow,
-                            contentDescription = "Escuchar",
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Default.PictureAsPdf,
+                            contentDescription = "Exportar PDF",
+                            modifier = Modifier.size(17.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (speakingBlockIndex != -1) "Detener" else "Escuchar",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            text = "Exportar PDF",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showSettingsBottomSheet = true },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceElevated)
+                            .border(1.dp, OpticalYellow.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Ajustes de voz y lectura",
+                            tint = OpticalYellow
                         )
                     }
                 }
+            }
+        },
+        bottomBar = {
+            // Bottom Player persistente estilo reproductor de audio
+            PersistentAudioBottomPlayer(
+                activeProfile = selectedProfile,
+                isPlaying = speakingBlockIndex != -1,
+                isPaused = isPaused,
+                currentBlockNumber = when {
+                    speakingBlockIndex != -1 -> speakingBlockIndex + 1
+                    isPaused -> pausedBlockIndex + 1
+                    else -> 1
+                },
+                totalBlocks = microBlocks.size,
+                speechRate = speechRate,
+                onPlayClick = {
+                    val target = if (speakingBlockIndex != -1) {
+                        speakingBlockIndex
+                    } else {
+                        pausedBlockIndex.coerceIn(0, (microBlocks.size - 1).coerceAtLeast(0))
+                    }
+                    speakBlock(target, selectedProfile, speechRate)
+                },
+                onPauseClick = { pauseSpeech() },
+                onStopClick = { stopSpeech() },
+                onSpeedSelect = { newSpeed ->
+                    speechRate = newSpeed
+                    if (speakingBlockIndex != -1) {
+                        speakBlock(speakingBlockIndex, selectedProfile, newSpeed)
+                    }
+                },
+                onOpenVoiceSheet = { showSettingsBottomSheet = true }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(PureBlack)
+        ) {
+            // Sub-barra informativa del documento actual y modo activo
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = documentTitle,
+                    color = MutedGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "${selectedMode.label} · ${microBlocks.size} bloques",
+                    color = OpticalYellow,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-                // Carrusel amplio con las 5 voces
-                Row(
+            if (isLoadingFile) {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
                 ) {
-                    voicePresets.forEach { preset ->
-                        val isSelected = selectedVoicePreset.id == preset.id
-                        Column(
-                            modifier = Modifier
-                                .width(134.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (isSelected) preset.accentColor.copy(alpha = 0.22f)
-                                    else SurfaceElevated
-                                )
-                                .border(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) preset.accentColor else BorderZinc,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                                .clickable {
-                                    selectedVoicePreset = preset
-                                    val targetBlock = if (speakingBlockIndex != -1) speakingBlockIndex else 0
-                                    speakBlockWithPreset(targetBlock, preset, speechRate)
-                                }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(9.dp)
-                                        .clip(CircleShape)
-                                        .background(preset.accentColor)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = preset.name,
-                                    color = PureWhite,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Text(
-                                text = preset.subtitle,
-                                color = MutedGray,
-                                fontSize = 11.sp
-                            )
-                            Text(
-                                text = "Tono ${(preset.pitch * 100).toInt()}% · ${preset.localeCountry}",
-                                color = preset.accentColor,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    CircularProgressIndicator(color = OpticalYellow)
                 }
-
-                // Selector de velocidad y Exportar PDF
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            } else {
+                LazyColumn(
+                    state = lazyListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 4.dp,
+                        bottom = 24.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Text(
-                        text = "Velocidad:",
-                        color = MutedGray,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    itemsIndexed(
+                        items = microBlocks,
+                        key = { idx, _ -> idx }
+                    ) { index, block ->
+                        // Karaoke / Utterance Sync: resalta en tiempo real el bloque que se está leyendo con #FFD600
+                        val isKaraokeActive = speakingBlockIndex == index
+                        val styledBlock = remember(block, selectedMode) {
+                            formatAdaptiveBlockAnnotated(block, selectedMode)
+                        }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(1.0f, 1.25f, 1.5f, 1.75f).forEach { speed ->
-                            val activeSpeed = speechRate == speed
-                            Box(
+                        val cardBgColor = when {
+                            isKaraokeActive -> Color(0xFF232114)
+                            highContrastYellow -> PureBlack
+                            else -> SurfaceZinc
+                        }
+                        val cardBorderColor = when {
+                            isKaraokeActive -> OpticalYellow
+                            highContrastYellow -> OpticalYellow.copy(alpha = 0.7f)
+                            else -> BorderZinc
+                        }
+                        val blockTextColor = when {
+                            isKaraokeActive -> OpticalYellow
+                            highContrastYellow -> OpticalYellow
+                            else -> PureWhite
+                        }
+
+                        Card(
+                            onClick = { speakBlock(index, selectedProfile, speechRate) },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = cardBgColor),
+                            border = BorderStroke(
+                                width = if (isKaraokeActive) 2.dp else 1.dp,
+                                color = cardBorderColor
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (activeSpeed) selectedVoicePreset.accentColor else SurfaceElevated)
-                                    .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        speechRate = speed
-                                        if (speakingBlockIndex != -1) {
-                                            speakBlockWithPreset(speakingBlockIndex, selectedVoicePreset, speed)
-                                        }
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .fillMaxWidth()
+                                    .padding(18.dp)
                             ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isKaraokeActive) {
+                                            Icon(
+                                                imageVector = Icons.Default.GraphicEq,
+                                                contentDescription = "Leyendo en vivo",
+                                                tint = OpticalYellow,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = if (isKaraokeActive) {
+                                                "LEYENDO BLOQUE ${String.format("%02d", index + 1)}"
+                                            } else {
+                                                "BLOQUE ${String.format("%02d", index + 1)}"
+                                            },
+                                            color = if (isKaraokeActive || highContrastYellow) OpticalYellow else MutedGray,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.Default.VolumeUp,
+                                        contentDescription = "Tocar para leer desde aquí",
+                                        tint = if (isKaraokeActive) OpticalYellow else MutedGray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
                                 Text(
-                                    text = "${speed}x",
-                                    color = if (activeSpeed) PureBlack else PureWhite,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
+                                    text = styledBlock,
+                                    color = blockTextColor,
+                                    fontSize = effectiveFontSize.sp,
+                                    lineHeight = (effectiveFontSize * 1.5f).sp
                                 )
                             }
                         }
@@ -596,41 +635,346 @@ fun AdaptiveReaderScreen() {
                 }
             }
         }
+    }
 
-        // 3. Barra de Exportación PDF con interruptor "Máx. 3 hojas"
-        item {
-            Row(
+    // ModalBottomSheet con configuración detallada de las 5 voces TTS reales, modos y contraste/tipografía
+    if (showSettingsBottomSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsBottomSheet = false },
+            sheetState = sheetState,
+            containerColor = SurfaceZinc,
+            contentColor = PureWhite
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(SurfaceZinc)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(
-                        checked = limitToThreePages,
-                        onCheckedChange = { limitToThreePages = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = PureWhite,
-                            checkedTrackColor = AccentIndigo,
-                            uncheckedThumbColor = MutedGray,
-                            uncheckedTrackColor = PureBlack
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Ajustes del Lector y Voces TTS",
+                    color = PureWhite,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+
+                // 1. Modos de Accesibilidad
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Máx. 3 hojas",
-                        color = PureWhite,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = "MODO DE LECTURA",
+                        color = MutedGray,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ReaderAccessibilityMode.values().forEach { mode ->
+                            val selected = selectedMode == mode
+                            FilterChip(
+                                selected = selected,
+                                onClick = { selectedMode = mode },
+                                label = {
+                                    Text(
+                                        text = mode.label,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OpticalYellow,
+                                    selectedLabelColor = PureBlack,
+                                    containerColor = SurfaceElevated,
+                                    labelColor = PureWhite
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 2. Controles de Escala Tipográfica (A- / A+) y Alto Contraste Amarillo Óptico
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { fontSizeSp = (fontSizeSp - 2f).coerceAtLeast(14f) },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, BorderZinc),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = SurfaceElevated,
+                                contentColor = PureWhite
+                            )
+                        ) {
+                            Text("A-", fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = "${fontSizeSp.toInt()} sp",
+                            color = PureWhite,
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        OutlinedButton(
+                            onClick = { fontSizeSp = (fontSizeSp + 2f).coerceAtMost(32f) },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, BorderZinc),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = SurfaceElevated,
+                                contentColor = PureWhite
+                            )
+                        ) {
+                            Text("A+", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    FilterChip(
+                        selected = highContrastYellow,
+                        onClick = { highContrastYellow = !highContrastYellow },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Contrast,
+                                contentDescription = null,
+                                tint = if (highContrastYellow) PureBlack else OpticalYellow,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = "Contraste #FFD600",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = OpticalYellow,
+                            selectedLabelColor = PureBlack,
+                            containerColor = SurfaceElevated,
+                            labelColor = PureWhite
+                        )
                     )
                 }
 
+                HorizontalDivider(color = BorderZinc)
+
+                // 3. Selector visual de los 5 perfiles de voz TTS reales
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "PERFILES DE VOZ NEURONAL (5 VOCES)",
+                        color = MutedGray,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    TextButton(
+                        onClick = { promptInstallHighFidelityTtsData(context) },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            tint = OpticalYellow,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Instalar voces HD",
+                            color = OpticalYellow,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (!hasHighQualityVoices) {
+                    Surface(
+                        color = AccentAmber.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, AccentAmber.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { promptInstallHighFidelityTtsData(context) }
+                    ) {
+                        Text(
+                            text = "Tu teléfono solo tiene voces básicas instaladas. Toca aquí para descargar los paquetes de voz neuronal de alta calidad de Google TTS.",
+                            color = PureWhite,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    voiceProfilesCatalog.forEach { profile ->
+                        val isSelected = selectedProfile.id == profile.id
+                        val assignedVoice = mappedVoicesByProfile[profile.id]
+                        val voiceBadge = assignedVoice?.let {
+                            "${it.locale.language}-${it.locale.country}"
+                        } ?: profile.preferredRegions.first()
+
+                        Card(
+                            onClick = {
+                                selectedProfile = profile
+                                val targetBlock = if (speakingBlockIndex != -1) {
+                                    speakingBlockIndex
+                                } else {
+                                    pausedBlockIndex.coerceIn(0, (microBlocks.size - 1).coerceAtLeast(0))
+                                }
+                                speakBlock(targetBlock, profile, speechRate)
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    profile.accentColor.copy(alpha = 0.18f)
+                                } else {
+                                    SurfaceElevated
+                                }
+                            ),
+                            border = BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) profile.accentColor else BorderZinc
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .background(profile.accentColor)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = profile.name,
+                                                color = PureWhite,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = voiceBadge,
+                                                color = profile.accentColor,
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Text(
+                                            text = profile.description,
+                                            color = MutedGray,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Seleccionada",
+                                        tint = profile.accentColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+
+    // Diálogo Modal de Exportación PDF con el switch "Máx. 3 hojas" adentro
+    if (showExportPdfDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportPdfDialog = false },
+            containerColor = SurfaceElevated,
+            titleContentColor = PureWhite,
+            textContentColor = PureWhite,
+            title = {
+                Text(
+                    text = "Exportar PDF Adaptado",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Se generará un documento PDF con el modo \"${selectedMode.label}\" listo para imprimir o compartir.",
+                        color = MutedGray,
+                        fontSize = 13.sp
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceZinc)
+                            .border(1.dp, BorderZinc, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Limitar a máx. 3 hojas",
+                                color = PureWhite,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Ajusta automáticamente la letra para que todo entre en 3 páginas",
+                                color = MutedGray,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = limitToThreePages,
+                            onCheckedChange = { limitToThreePages = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PureBlack,
+                                checkedTrackColor = OpticalYellow,
+                                uncheckedThumbColor = MutedGray,
+                                uncheckedTrackColor = PureBlack
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
                 Button(
                     onClick = {
+                        showExportPdfDialog = false
                         PdfExportHelper.exportAndShareAdaptedPdf(
                             context = context,
                             title = documentTitle,
@@ -641,147 +985,305 @@ fun AdaptiveReaderScreen() {
                             limitToThreePages = limitToThreePages
                         )
                     },
-                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (highContrastYellow) OpticalYellow else AccentIndigo,
-                        contentColor = if (highContrastYellow) PureBlack else PureWhite
+                        containerColor = OpticalYellow,
+                        contentColor = PureBlack
                     )
                 ) {
+                    Text("Generar y Compartir", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportPdfDialog = false }) {
+                    Text("Cancelar", color = MutedGray)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PersistentAudioBottomPlayer(
+    activeProfile: KansoVoiceProfile,
+    isPlaying: Boolean,
+    isPaused: Boolean,
+    currentBlockNumber: Int,
+    totalBlocks: Int,
+    speechRate: Float,
+    onPlayClick: () -> Unit,
+    onPauseClick: () -> Unit,
+    onStopClick: () -> Unit,
+    onSpeedSelect: (Float) -> Unit,
+    onOpenVoiceSheet: () -> Unit
+) {
+    Surface(
+        color = SurfaceZinc,
+        tonalElevation = 8.dp,
+        border = BorderStroke(1.dp, BorderZinc),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Fila superior del reproductor: Indicador de Voz Activa + Selector rápido de velocidad
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceElevated)
+                        .border(1.dp, activeProfile.accentColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                        .clickable { onOpenVoiceSheet() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
-                        imageVector = Icons.Default.PictureAsPdf,
-                        contentDescription = "Exportar PDF",
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.RecordVoiceOver,
+                        contentDescription = "Voz activa",
+                        tint = activeProfile.accentColor,
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Exportar PDF",
+                        text = "Voz: ${activeProfile.name}",
+                        color = PureWhite,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-            }
-        }
 
-        // 4. Bloques de Lectura con buen espacio interior
-        if (isLoadingFile) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp),
-                    contentAlignment = Alignment.Center
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(color = AccentIndigo)
-                }
-            }
-        } else {
-            itemsIndexed(microBlocks) { index, block ->
-                val isBlockSpeaking = speakingBlockIndex == index
-                val styledBlock = remember(block, selectedMode) {
-                    formatAdaptiveBlockAnnotated(block, selectedMode)
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(activeCardBg)
-                        .border(
-                            width = if (isBlockSpeaking) 2.dp else 1.dp,
-                            color = if (isBlockSpeaking) selectedVoicePreset.accentColor else activeBorderColor,
-                            shape = RoundedCornerShape(18.dp)
-                        )
-                        .clickable {
-                            speakBlockWithPreset(index, selectedVoicePreset, speechRate)
+                    listOf(1.0f, 1.25f, 1.5f, 1.75f).forEach { speed ->
+                        val isSelectedSpeed = speechRate == speed
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelectedSpeed) OpticalYellow else SurfaceElevated)
+                                .border(
+                                    1.dp,
+                                    if (isSelectedSpeed) OpticalYellow else BorderZinc,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { onSpeedSelect(speed) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${speed}x",
+                                color = if (isSelectedSpeed) PureBlack else PureWhite,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                        .padding(20.dp)
+                    }
+                }
+            }
+
+            // Fila inferior del reproductor: Estado de bloque + Controles horizontales Play, Pause, Stop
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when {
+                            isPlaying -> "Reproduciendo bloque $currentBlockNumber de $totalBlocks"
+                            isPaused -> "En pausa · Bloque $currentBlockNumber de $totalBlocks"
+                            else -> "Listo para reproducir ($totalBlocks bloques)"
+                        },
+                        color = if (isPlaying) OpticalYellow else PureWhite,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Botón Play
+                    IconButton(
+                        onClick = onPlayClick,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(if (isPlaying) AccentEmerald else OpticalYellow)
                     ) {
-                        Text(
-                            text = "BLOQUE ${String.format("%02d", index + 1)} · ${selectedVoicePreset.name.uppercase()}",
-                            color = if (highContrastYellow) OpticalYellow else selectedVoicePreset.accentColor,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
                         Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "Escuchar bloque",
-                            tint = if (isBlockSpeaking) selectedVoicePreset.accentColor else MutedGray,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Reproducir",
+                            tint = PureBlack,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // Botón Pause
+                    IconButton(
+                        onClick = onPauseClick,
+                        enabled = isPlaying,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(if (isPlaying) SurfaceElevated else SurfaceElevated.copy(alpha = 0.5f))
+                            .border(1.dp, BorderZinc, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Pause,
+                            contentDescription = "Pausar",
+                            tint = if (isPlaying) PureWhite else MutedGray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
-                    Text(
-                        text = styledBlock,
-                        color = activeTextColor,
-                        fontSize = effectiveFontSize.sp,
-                        lineHeight = (effectiveFontSize * 1.5f).sp
-                    )
+                    // Botón Stop
+                    IconButton(
+                        onClick = onStopClick,
+                        enabled = isPlaying || isPaused,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(if (isPlaying || isPaused) SurfaceElevated else SurfaceElevated.copy(alpha = 0.5f))
+                            .border(1.dp, BorderZinc, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Detener",
+                            tint = if (isPlaying || isPaused) AccentAmber else MutedGray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-private fun configureDistinctVoice(
-    tts: TextToSpeech,
-    preset: KansoVoicePreset,
-    baseSpeechRate: Float
-) {
-    try {
-        val targetLocale = Locale("es", preset.localeCountry)
-        tts.language = targetLocale
-
-        val allSpanishVoices: List<Voice> = tts.voices
-            ?.filter { it.locale.language.startsWith("es", ignoreCase = true) }
-            ?.sortedWith(
-                compareBy<Voice> { it.isNetworkConnectionRequired }
-                    .thenBy { it.name }
-            )
+/**
+ * Consulta `textToSpeech.voices`, filtra las voces en español priorizando
+ * `Voice.QUALITY_VERY_HIGH` y `Voice.QUALITY_HIGH`, y asigna objetos `Voice` reales
+ * distintos a cada uno de los 5 perfiles.
+ */
+private fun mapRealHighFidelityVoices(
+    tts: TextToSpeech
+): Pair<Map<String, Voice>, Boolean> {
+    return try {
+        val allSpanishVoices = tts.voices
+            ?.filter { voice ->
+                voice.locale.language.equals("es", ignoreCase = true) ||
+                        voice.locale.language.startsWith("es", ignoreCase = true)
+            }
             .orEmpty()
 
-        if (allSpanishVoices.isNotEmpty()) {
-            val femalePool = allSpanishVoices.filter { v ->
-                val n = v.name.lowercase()
-                n.contains("female") || n.contains("sfg") || n.contains("eea") ||
-                        n.contains("sfb") || n.contains("esf") || n.contains("femen")
-            }
-            val malePool = allSpanishVoices.filter { v ->
-                val n = v.name.lowercase()
-                (n.contains("male") && !n.contains("female")) || n.contains("eef") ||
-                        n.contains("eed") || n.contains("sfd") || n.contains("mascul")
-            }
+        val highQualityVoices = allSpanishVoices.filter { voice ->
+            voice.quality >= Voice.QUALITY_HIGH && !voice.isNetworkConnectionRequired
+        }.ifEmpty {
+            allSpanishVoices.filter { it.quality >= Voice.QUALITY_HIGH }
+        }
 
-            val chosenVoice: Voice = when (preset.preferFemale) {
-                true -> if (femalePool.isNotEmpty()) {
-                    femalePool[preset.index % femalePool.size]
-                } else {
-                    allSpanishVoices[preset.index % allSpanishVoices.size]
-                }
-                false -> if (malePool.isNotEmpty()) {
-                    malePool[preset.index % malePool.size]
-                } else {
-                    allSpanishVoices.reversed()[preset.index % allSpanishVoices.size]
-                }
-                null -> allSpanishVoices[preset.index % allSpanishVoices.size]
-            }
-            tts.voice = chosenVoice
+        val candidatePool = highQualityVoices.ifEmpty { allSpanishVoices }
+            .sortedWith(
+                compareByDescending<Voice> { it.quality }
+                    .thenBy { it.isNetworkConnectionRequired }
+                    .thenBy { it.name }
+            )
+
+        val usedVoiceNames = mutableSetOf<String>()
+        val result = mutableMapOf<String, Voice>()
+
+        for (profile in voiceProfilesCatalog) {
+            if (candidatePool.isEmpty()) break
+
+            val chosen = candidatePool.firstOrNull { v ->
+                v.name !in usedVoiceNames &&
+                        matchesGenderPreference(v, profile.preferMale) &&
+                        profile.preferredRegions.any { reg ->
+                            v.locale.country.equals(reg, ignoreCase = true) ||
+                                    v.name.contains(reg, ignoreCase = true)
+                        }
+            } ?: candidatePool.firstOrNull { v ->
+                v.name !in usedVoiceNames && matchesGenderPreference(v, profile.preferMale)
+            } ?: candidatePool.firstOrNull { v ->
+                v.name !in usedVoiceNames
+            } ?: candidatePool.first()
+
+            usedVoiceNames.add(chosen.name)
+            result[profile.id] = chosen
+        }
+
+        result to (highQualityVoices.size >= 2)
+    } catch (_: Exception) {
+        emptyMap<String, Voice>() to false
+    }
+}
+
+private fun matchesGenderPreference(voice: Voice, preferMale: Boolean): Boolean {
+    val n = voice.name.lowercase()
+    val features = voice.features?.map { it.lowercase() }.orEmpty()
+    val isExplicitMale = (n.contains("male") && !n.contains("female")) ||
+            n.contains("-eef") || n.contains("-eed") || n.contains("-sfd") ||
+            n.contains("-esd") || n.contains("mascul") ||
+            features.any { it.contains("male") && !it.contains("female") }
+    val isExplicitFemale = n.contains("female") ||
+            n.contains("-eea") || n.contains("-efc") || n.contains("-sfb") ||
+            n.contains("-sfg") || n.contains("-esf") || n.contains("femen") ||
+            features.any { it.contains("female") }
+
+    return if (preferMale) {
+        isExplicitMale || !isExplicitFemale
+    } else {
+        isExplicitFemale || !isExplicitMale
+    }
+}
+
+private fun applyRealVoiceProfile(
+    tts: TextToSpeech,
+    profile: KansoVoiceProfile,
+    mappedVoice: Voice?,
+    userSpeed: Float
+) {
+    try {
+        if (mappedVoice != null) {
+            tts.voice = mappedVoice
+        } else {
+            val fallbackCountry = profile.preferredRegions.firstOrNull() ?: "ES"
+            tts.language = Locale("es", fallbackCountry)
         }
     } catch (_: Exception) {
-        // Fallback al motor estándar
     }
 
-    // IMPORTANTE: En Android TTS, setPitch y setSpeechRate deben ejecutarse DESPUÉS de setLanguage/setVoice
-    // para que el motor no restablezca el timbre a 1.0f.
-    tts.setPitch(preset.pitch)
-    tts.setSpeechRate((baseSpeechRate * preset.rateMultiplier).coerceIn(0.55f, 2.2f))
+    tts.setPitch(profile.subtlePitch)
+    tts.setSpeechRate((userSpeed * profile.cadenceMultiplier).coerceIn(0.75f, 2.0f))
+}
+
+/**
+ * Dispara el Intent oficial de Android para instalar paquetes de voz TTS de alta fidelidad.
+ */
+fun promptInstallHighFidelityTtsData(context: Context) {
+    try {
+        val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(installIntent)
+    } catch (_: Exception) {
+    }
+}
+
+private fun parseBlockIndexFromUtterance(utteranceId: String?): Int? {
+    if (utteranceId == null || !utteranceId.startsWith("karaoke_")) return null
+    return utteranceId.removePrefix("karaoke_").substringBefore("_").toIntOrNull()
 }
 
 private fun formatAdaptiveBlockAnnotated(

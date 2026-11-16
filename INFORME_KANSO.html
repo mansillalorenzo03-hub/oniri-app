@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Informe Técnico y Funcional - Kanso App</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --accent: #6366f1;
+            --emerald: #10b981;
+            --border: #334155;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #f1f5f9;
+            color: #0f172a;
+            margin: 0;
+            padding: 32px 16px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 40px 48px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .logo-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .logo-k {
+            width: 48px;
+            height: 48px;
+            background: #000000;
+            color: #ffffff;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            font-weight: 800;
+        }
+        .btn-print {
+            background: #6366f1;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-print:hover {
+            background: #4f46e5;
+        }
+        h1 { margin: 0; font-size: 26px; }
+        h2 {
+            color: #1e293b;
+            border-left: 4px solid #6366f1;
+            padding-left: 12px;
+            margin-top: 32px;
+            font-size: 20px;
+        }
+        h3 {
+            color: #334155;
+            margin-top: 22px;
+            font-size: 16px;
+        }
+        ul { padding-left: 22px; }
+        li { margin-bottom: 8px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        th, td {
+            border: 1px solid #cbd5e1;
+            padding: 12px;
+            text-align: left;
+            font-size: 14px;
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 700;
+        }
+        .badge {
+            display: inline-block;
+            background: #e0e7ff;
+            color: #4338ca;
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        @media print {
+            body { background: white; padding: 0; }
+            .container { box-shadow: none; padding: 0; }
+            .btn-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="toolbar">
+        <div class="logo-row">
+            <div class="logo-k">K</div>
+            <div>
+                <h1>Informe Técnico y Funcional · KANSO</h1>
+                <span class="badge">Android Nativo · Kotlin &amp; Jetpack Compose</span>
+            </div>
+        </div>
+        <button class="btn-print" onclick="window.print()">Descargar / Guardar en PDF</button>
+    </div>
+
+    <p><strong>Kanso</strong> (<code>com.kanso.focus</code>) es una aplicación nativa para Android desarrollada en <strong>Kotlin</strong> y <strong>Jetpack Compose (Material 3)</strong> con dos propósitos principales:</p>
+    <ol>
+        <li><strong>Concentración y Bienestar Digital:</strong> Bloqueo real de aplicaciones distractoras y silenciamiento selectivo de notificaciones organizado por perfiles personalizados.</li>
+        <li><strong>Accesibilidad Cognitiva y Visual:</strong> Lector y exportador de documentos PDF/TXT adaptado para personas con <strong>Dislexia</strong> y <strong>Poca Visión</strong>, con síntesis de voz en 5 perfiles distintos.</li>
+    </ol>
+
+    <h2>1. Sistema de Perfiles Estilo Netflix con Fotos Personalizadas</h2>
+    <ul>
+        <li><strong>Pantalla de Bienvenida:</strong> Al abrir la aplicación, aparece una cuadrícula visual de perfiles (<em>Estudio</em>, <em>Trabajo</em>, <em>Descanso</em> o perfiles creados por el usuario).</li>
+        <li><strong>Foto Personalizada por Perfil:</strong> Cada perfil incluye un botón de cámara para elegir cualquier imagen de la galería del teléfono (tanto al crear un perfil como en perfiles existentes). La imagen se guarda optimizada en el almacenamiento interno para cargar en <strong>0 ms</strong>.</li>
+        <li><strong>Administración y Eliminación:</strong> El botón <em>"Administrar / Borrar perfiles"</em> permite eliminar cualquier perfil existente o añadir nuevos.</li>
+        <li><strong>Listas Independientes:</strong> Cada perfil conserva su propia lista de apps bloqueadas y apps con notificaciones silenciadas.</li>
+    </ul>
+
+    <h2>2. Menú de 3 Barritas (☰) y Optimización de Velocidad</h2>
+    <ul>
+        <li><strong>Menú Lateral Deslizable:</strong> Al tocar el botón de las <strong>3 barritas (☰)</strong> en la esquina superior izquierda se despliega el menú lateral para cambiar entre <strong>Modo Enfoque</strong>, <strong>Lector Adaptado</strong> y <strong>Cambiar de Perfil</strong>.</li>
+        <li><strong>Carga Instantánea en Caché:</strong> Mientras el usuario elige su perfil al iniciar la app, Kanso precarga en segundo plano el catálogo de aplicaciones instaladas y sus iconos en memoria, logrando que las cuadrículas de selección abran de forma instantánea.</li>
+    </ul>
+
+    <h2>3. Modo Enfoque: Encendido/Apagado y Cuadrícula de 3 Columnas</h2>
+    <ul>
+        <li><strong>Tarjeta de Encendido (Botón Power ON/OFF):</strong> Cuenta con un botón circular central tipo Power e interruptor <code>Switch</code> para encender o apagar el <strong>Modo Libre</strong> cuando quieras, además del botón de <strong>Temporizador Estricto (Sin salida)</strong> que impide cancelar la sesión antes de que el reloj llegue a <code>00:00</code>.</li>
+        <li><strong>Cuadrado 1 · Bloquear Apps (3 Columnas):</strong> Abre una cuadrícula de <strong>3 columnas</strong> donde cada aplicación es un cuadrado con su <strong>icono real arriba y su nombre abajo</strong>. Con un toque se bloquea o desbloquea.</li>
+        <li><strong>Cuadrado 2 · Notificaciones (3 Columnas):</strong> Abre una cuadrícula independiente de <strong>3 columnas</strong> para silenciar o activar las notificaciones de cada aplicación.</li>
+        <li><strong>Programador Diario:</strong> Permite programar una hora diaria automática mediante <code>AlarmManager</code>.</li>
+    </ul>
+
+    <h2>4. Motor Dual de Bloqueo Real en Android</h2>
+    <ul>
+        <li><strong>Panel Guiado de Permisos:</strong> Incluye indicadores en tiempo real para activar los 4 permisos del sistema: <em>Mostrar sobre otras apps</em>, <em>Acceso de Uso</em>, <em>Servicio de Accesibilidad</em> y <em>Acceso a Notificaciones</em>.</li>
+        <li><strong>Cierre y Pantalla de Bloqueo:</strong> Cuando intentas abrir una app bloqueada durante una sesión activa, Kanso la detecta al instante, ejecuta la acción de salida al inicio y superpone la pantalla de bloqueo con el cronómetro activo.</li>
+    </ul>
+
+    <h2>5. Lector y Exportador Accesible (Dislexia, Poca Visión y 5 Voces)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Función</th>
+                <th>Detalle</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>3 Modos de Lectura</strong></td>
+                <td><strong>Solo Dislexia</strong> (lectura biónica con raíz de cada palabra en negrita), <strong>Poca Visión</strong> (letra ampliada y todos los números un <strong>15% más grandes en negrita</strong>) y <strong>Ambas</strong>.</td>
+            </tr>
+            <tr>
+                <td><strong>Carga de PDF y TXT</strong></td>
+                <td>Extrae el texto de cualquier documento PDF o TXT con <code>PDFBox-Android</code> y lo divide en micro-bloques cortos numerados.</td>
+            </tr>
+            <tr>
+                <td><strong>5 Voces Distintas (TTS)</strong></td>
+                <td>
+                    1. <strong>Humana</strong> (Natural cálida · Tono 100% · <code>es-MX</code>)<br>
+                    2. <strong>Mujer</strong> (Femenina suave y clara · Tono 142% · <code>es-ES</code>)<br>
+                    3. <strong>Grave</strong> (Profunda firme · Tono 58% · <code>es-US</code>)<br>
+                    4. <strong>Narrador</strong> (Barítono pausado · Tono 76% · <code>es-AR</code>)<br>
+                    5. <strong>Juvenil</strong> (Aguda dinámica · Tono 166% · <code>es-ES</code>)<br>
+                    Con selector de velocidad (<code>1.0x</code>, <code>1.25x</code>, <code>1.5x</code>, <code>1.75x</code>).
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Contraste y Escala</strong></td>
+                <td>Ajuste de tamaño de letra <code>A-</code> / <code>A+</code> y modo de <strong>Alto Contraste Amarillo Óptico (<code>#FFD600</code> sobre negro)</strong>.</td>
+            </tr>
+            <tr>
+                <td><strong>Exportador PDF Adaptado</strong></td>
+                <td>Genera y comparte un nuevo PDF con las adaptaciones aplicadas e incluye el interruptor <strong>"Máx. 3 hojas"</strong> que ajusta automáticamente el tamaño de fuente para que todo el documento quepa en 3 páginas.</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+</body>
+</html>
